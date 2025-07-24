@@ -1,0 +1,8 @@
+{
+    "threshold_db": 70,
+    "calibration_offset": 94,
+    "use_external_adapter": true,
+    "scan_interval": 30,
+    "attack_methods": [1, 2, 3],
+    "debug_mode": false
+}

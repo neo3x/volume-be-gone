@@ -1,0 +1,22 @@
+# Volume Be Gone - Python Dependencies
+# Install with: pip3 install -r requirements.txt
+
+# Audio processing
+sounddevice==0.4.6
+numpy==1.24.3
+scipy==1.10.1
+
+# Bluetooth
+pybluez==0.23
+
+# GPIO and Hardware
+RPi.GPIO==0.7.1
+
+# Display
+Adafruit-SSD1306==1.6.2
+Adafruit-GPIO==1.0.3
+Pillow==10.0.0
+
+# System
+psutil==5.9.5
+python-apt==2.4.0

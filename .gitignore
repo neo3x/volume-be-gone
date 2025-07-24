@@ -1,0 +1,79 @@
+# Byte-compiled / optimized / DLL files 
+__pycache__/ 
+*.py[cod] 
+*$py.class 
+ 
+# C extensions 
+*.so 
+ 
+# Distribution / packaging 
+.Python 
+build/ 
+develop-eggs/ 
+dist/ 
+downloads/ 
+eggs/ 
+.eggs/ 
+lib/ 
+lib64/ 
+parts/ 
+sdist/ 
+var/ 
+wheels/ 
+*.egg-info/ 
+.installed.cfg 
+*.egg 
+MANIFEST 
+ 
+# Virtual environments 
+venv/ 
+ENV/ 
+env/ 
+ 
+# IDE 
+.vscode/ 
+.idea/ 
+*.swp 
+*.swo 
+*~ 
+ 
+# OS 
+.DS_Store 
+.DS_Store? 
+._* 
+.Spotlight-V100 
+.Trashes 
+ehthumbs.db 
+Thumbs.db 
+ 
+# Project specific 
+config.json 
+log.txt 
+*.log 
+test.wav 
+*.wav 
+ 
+# Temporary files 
+*.tmp 
+*.temp 
+*.bak 
+ 
+# Documentation builds 
+docs/_build/ 
+docs/.doctrees/ 
+ 
+# Coverage reports 
+htmlcov/ 
+.coverage 
+.coverage.* 
+coverage.xml 
+*.cover 
+ 
+# pytest 
+.pytest_cache/ 
+ 
+# Jupyter Notebook 
+.ipynb_checkpoints 
+ 
+# pyenv 
+.python-version 
