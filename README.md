@@ -40,12 +40,13 @@ Ver diagrama completo en hardware/README.md
 
 ```bash
 # Clonar repositorio
-git clone https://github.com/tu-usuario/volume-be-gone.git
+git clone https://github.com/neo3x/volume-be-gone.git
 cd volume-be-gone
 
 # Ejecutar instalador automatico
 chmod +x scripts/install.sh
 sudo ./scripts/install.sh
+#setup.bat hara la estructura completa del proyecto.
 ```
 
 ### Metodo manual:
