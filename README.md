@@ -72,6 +72,47 @@ sudo python3 volumeBeGone.py
 sudo systemctl start volumebegone
 ```
 
+### 🔄 Auto-Inicio al Encender
+
+Habilita el inicio automatico para que se ejecute al encender la Raspberry Pi:
+
+```bash
+# Metodo facil - Script interactivo
+sudo bash scripts/autostart.sh
+
+# O manualmente
+sudo systemctl enable volumebegone
+sudo systemctl start volumebegone
+```
+
+**Pantalla de carga en OLED:**
+Al encender, veras una barra de progreso en la pantalla OLED mostrando:
+- Init Display... (14%)
+- Setup GPIO... (28%)
+- Load Config... (42%)
+- Check Bluetooth... (57%)
+- Check Mic... (71%)
+- Load Resources... (85%)
+- System Ready! (100%)
+
+Ver **GUIA_AUTOSTART.md** para instrucciones detalladas.
+
+### Comandos utiles:
+
+```bash
+# Ver estado del servicio
+sudo systemctl status volumebegone
+
+# Ver logs en tiempo real
+sudo journalctl -u volumebegone -f
+
+# Detener servicio
+sudo systemctl stop volumebegone
+
+# Deshabilitar auto-inicio
+sudo systemctl disable volumebegone
+```
+
 ## 📄 Licencia
 
 Este proyecto esta bajo la Licencia MIT - ver LICENSE para detalles.

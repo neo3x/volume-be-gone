@@ -218,6 +218,67 @@ def update_config_screen():
     disp.image(image)
     disp.display()
 
+def show_boot_screen(step, total_steps, message):
+    """Muestra pantalla de carga con barra de progreso"""
+    image = Image.new('1', (width, height))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0,0,width,height), outline=0, fill=0)
+
+    # Logo/Título
+    draw.text((x, top+2), "Volume BeGone", font=font, fill=255)
+    draw.text((x+20, top+14), "v2.1", font=font_small, fill=255)
+
+    # Mensaje de estado
+    draw.text((x, top+28), "Cargando...", font=font, fill=255)
+    draw.text((x, top+40), message[:20], font=font_small, fill=255)
+
+    # Barra de progreso
+    bar_y = top + 52
+    bar_height = 6
+    bar_width = 120
+    bar_x = 4
+
+    # Marco
+    draw.rectangle((bar_x, bar_y, bar_x + bar_width, bar_y + bar_height), outline=255, fill=0)
+
+    # Progreso
+    progress = int((step / total_steps) * bar_width)
+    if progress > 2:
+        draw.rectangle((bar_x + 1, bar_y + 1, bar_x + progress - 1, bar_y + bar_height - 1), outline=255, fill=255)
+
+    # Porcentaje
+    percent = int((step / total_steps) * 100)
+    draw.text((x+50, top+40), f"{percent}%", font=font_small, fill=255)
+
+    disp.image(image)
+    disp.display()
+
+def show_status_screen(status, details="", icon=""):
+    """Muestra pantalla de estado simple"""
+    image = Image.new('1', (width, height))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0,0,width,height), outline=0, fill=0)
+
+    # Título
+    draw.text((x, top+2), "Volume BeGone", font=font, fill=255)
+
+    # Icono (simple)
+    if icon == "ok":
+        # Checkmark simple
+        draw.text((x+50, top+16), "[OK]", font=font, fill=255)
+    elif icon == "error":
+        draw.text((x+50, top+16), "[X]", font=font, fill=255)
+    elif icon == "warning":
+        draw.text((x+50, top+16), "[!]", font=font, fill=255)
+
+    # Estado
+    draw.text((x, top+28), status[:20], font=font, fill=255)
+    if details:
+        draw.text((x, top+40), details[:20], font=font_small, fill=255)
+
+    disp.image(image)
+    disp.display()
+
 def writeLog(myLine):
     """Escribe en el archivo de log"""
     try:
@@ -586,36 +647,87 @@ signal.signal(signal.SIGINT, signal_handler)
 
 def main():
     global monitoring, bt_devices, config_mode, threshold_db, bt_interface
-    
+
     print("")
-    print("Volume Be Gone 2.0 - Edición Encoder")
+    print("Volume Be Gone 2.1 - Auto-Start Edition")
     print("Control de parlantes BT por nivel de volumen")
     print("Gira el encoder para ajustar, presiona OK para iniciar")
     print("")
-    
-    # Configurar encoder
+
+    # Total de pasos de inicialización
+    total_steps = 7
+    current_step = 0
+
+    # Paso 1: Inicializar pantalla
+    current_step += 1
+    show_boot_screen(current_step, total_steps, "Init Display...")
+    print(f"[{current_step}/{total_steps}] Pantalla OLED inicializada")
+    time.sleep(0.5)
+
+    # Paso 2: Configurar GPIO/Encoder
+    current_step += 1
+    show_boot_screen(current_step, total_steps, "Setup GPIO...")
+    print(f"[{current_step}/{total_steps}] Configurando encoder")
     setup_encoder()
-    
-    # Cargar configuración previa
+    time.sleep(0.5)
+
+    # Paso 3: Cargar configuración
+    current_step += 1
+    show_boot_screen(current_step, total_steps, "Load Config...")
+    print(f"[{current_step}/{total_steps}] Cargando configuración")
     load_config()
-    
-    # Verificar adaptadores Bluetooth
+    time.sleep(0.5)
+
+    # Paso 4: Verificar Bluetooth
+    current_step += 1
+    show_boot_screen(current_step, total_steps, "Check Bluetooth...")
+    print(f"[{current_step}/{total_steps}] Verificando adaptadores Bluetooth")
     if not check_bluetooth_adapters():
         print("[!] Error: No se detectaron adaptadores Bluetooth")
+        show_status_screen("ERROR", "No Bluetooth", "error")
+        time.sleep(5)
         return
-    
-    writeLog(f"Iniciado - Volume Be Gone 2.0 Encoder - Adaptador: {bt_interface}")
-    
-    # Mostrar logo inicial
+    time.sleep(0.5)
+
+    # Paso 5: Verificar Micrófono
+    current_step += 1
+    show_boot_screen(current_step, total_steps, "Check Mic...")
+    print(f"[{current_step}/{total_steps}] Verificando micrófono USB")
+    try:
+        devices = sd.query_devices()
+        input_device = sd.query_devices(kind='input')
+        print(f"[*] Dispositivo de entrada: {input_device['name']}")
+    except Exception as e:
+        print(f"[!] Error: No se detectó micrófono USB: {e}")
+        show_status_screen("ERROR", "No Microfono", "error")
+        time.sleep(5)
+        return
+    time.sleep(0.5)
+
+    # Paso 6: Cargar recursos
+    current_step += 1
+    show_boot_screen(current_step, total_steps, "Load Resources...")
+    print(f"[{current_step}/{total_steps}] Cargando recursos")
     logo_path = myPath + 'images/logo.png'
+    time.sleep(0.3)
+
+    # Paso 7: Sistema listo
+    current_step += 1
+    show_boot_screen(current_step, total_steps, "System Ready!")
+    print(f"[{current_step}/{total_steps}] Sistema listo")
+    time.sleep(1)
+
+    writeLog(f"Iniciado - Volume Be Gone 2.1 - Adaptador: {bt_interface}")
+
+    # Mostrar logo si existe
     try:
         if os.path.exists(logo_path):
             image = Image.open(logo_path).convert('1')
             disp.image(image)
             disp.display()
-            time.sleep(2)
+            time.sleep(1.5)
         else:
-            print(f"[*] Logo no encontrado en {logo_path}, omitiendo...")
+            print(f"[*] Logo no encontrado, omitiendo...")
     except Exception as e:
         print(f"[!] Error cargando logo: {e}")
     

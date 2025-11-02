@@ -1,20 +1,49 @@
 [Unit]
-Description=Volume Be Gone - Bluetooth Speaker Control
-After=bluetooth.target sound.target network.target
-Wants=bluetooth.target
+Description=Volume Be Gone - Bluetooth Speaker Control by Volume Level
+Documentation=https://github.com/neo3x/volume-be-gone
+After=bluetooth.target sound.target network.target multi-user.target
+Wants=bluetooth.target sound.target
+RequiresMountsFor=/home/pi
 
 [Service]
 Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/home/pi/volumebegone
+
+# Variables de entorno
 Environment="PYTHONUNBUFFERED=1"
-ExecStartPre=/bin/sleep 10
+Environment="DISPLAY=:0"
+Environment="HOME=/home/pi"
+
+# Esperar a que los servicios de hardware estén listos
+ExecStartPre=/bin/sleep 15
+
+# Comando principal
 ExecStart=/usr/bin/python3 /home/pi/volumebegone/volumeBeGone.py
+
+# Limpieza al detener
+ExecStopPost=/usr/bin/pkill -f l2ping
+ExecStopPost=/usr/bin/pkill -f rfcomm
+
+# Política de reinicio
 Restart=on-failure
-RestartSec=10
+RestartSec=30
+StartLimitInterval=200
+StartLimitBurst=5
+
+# Logging
 StandardOutput=journal
 StandardError=journal
+SyslogIdentifier=volumebegone
+
+# Seguridad (opcional - ajustar según necesidad)
+# PrivateTmp=yes
+# NoNewPrivileges=true
+
+# Timeout
+TimeoutStartSec=60
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
