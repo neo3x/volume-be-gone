@@ -183,7 +183,7 @@ def encoder_button_callback(channel):
                     os.system("pkill -f l2ping")
                     os.system("pkill -f rfcomm")
                     time.sleep(1)
-                    os.execv(sys.executable, ['python3'] + sys.argv)
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
                 time.sleep(0.1)
 
 def update_config_screen():
@@ -397,8 +397,10 @@ def save_config():
         'use_external_adapter': use_external_adapter
     }
     try:
-        # Crear directorio si no existe
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        # Crear directorio si no existe (solo si hay directorio padre)
+        config_dir = os.path.dirname(config_path)
+        if config_dir:
+            os.makedirs(config_dir, exist_ok=True)
         with open(config_path, 'w') as f:
             json.dump(config, f, indent=2)
         writeLog(f"Configuración guardada: Umbral={threshold_db}dB, Adaptador={'Externo' if use_external_adapter else 'Interno'}")

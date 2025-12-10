@@ -1,7 +1,7 @@
-#/bin/bash 
-# 
-# Volume Be Gone - Automated Installer 
-# Run with: sudo bash install.sh 
+#!/bin/bash
+#
+# Volume Be Gone - Automated Installer
+# Run with: sudo bash install.sh
 # 
  
 set -e  # Exit on error 
@@ -49,12 +49,15 @@ echo -e "${YELLOW}[4/8] Installing Python dependencies...${NC}"
 pip3 install --upgrade pip 
 pip3 install -r requirements.txt 
  
-# Create project directory 
-echo -e "${YELLOW}[5/8] Creating project directory...${NC}" 
-mkdir -p /home/pi/volumebegone 
-cp src/volumeBeGone.py /home/pi/volumebegone/ 
-cp -r resources/images /home/pi/volumebegone/ 
-cp src/config.json.template /home/pi/volumebegone/config.json 
+# Create project directory
+echo -e "${YELLOW}[5/8] Creating project directory...${NC}"
+mkdir -p /home/pi/volumebegone
+cp src/volumeBeGone.py /home/pi/volumebegone/
+cp -r resources/images /home/pi/volumebegone/ 2>/dev/null || mkdir -p /home/pi/volumebegone/images
+# Create default config if needed
+if [ ! -f /home/pi/volumebegone/config.json ]; then
+    echo '{"threshold_db": 70, "calibration_offset": 94, "use_external_adapter": true}' > /home/pi/volumebegone/config.json
+fi
 chown -R pi:pi /home/pi/volumebegone 
  
 # Configure permissions 
