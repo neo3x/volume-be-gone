@@ -35,10 +35,13 @@ else
 fi
 
 REAL_HOME=$(eval echo ~$REAL_USER)
-INSTALL_DIR="$REAL_HOME/volumebegone"
+
+# Detectar directorio del proyecto (donde está el script)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+INSTALL_DIR="$SCRIPT_DIR"
 
 echo -e "${YELLOW}Usuario detectado: $REAL_USER${NC}"
-echo -e "${YELLOW}Directorio de instalación: $INSTALL_DIR${NC}"
+echo -e "${YELLOW}Directorio del proyecto: $INSTALL_DIR${NC}"
 echo
 
 # Detectar distribución
@@ -111,15 +114,8 @@ pip3 install $PIP_ARGS sounddevice || true
 # Adafruit SSD1306 y GPIO
 pip3 install $PIP_ARGS Adafruit-SSD1306 Adafruit-GPIO || true
 
-# Create project directory
-echo -e "${YELLOW}[6/8] Creating project directory...${NC}"
-mkdir -p "$INSTALL_DIR"
-mkdir -p "$INSTALL_DIR/images"
-
-# Copiar archivos
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cp "$SCRIPT_DIR/src/volumeBeGone.py" "$INSTALL_DIR/"
-cp -r "$SCRIPT_DIR/resources/images/"* "$INSTALL_DIR/images/" 2>/dev/null || true
+# Setup project directory
+echo -e "${YELLOW}[6/8] Setting up project directory...${NC}"
 
 # Create default config if needed
 if [ ! -f "$INSTALL_DIR/config.json" ]; then
@@ -155,7 +151,7 @@ WorkingDirectory=$INSTALL_DIR
 Environment="PYTHONUNBUFFERED=1"
 Environment="HOME=$REAL_HOME"
 ExecStartPre=/bin/sleep 15
-ExecStart=/usr/bin/python3 $INSTALL_DIR/volumeBeGone.py
+ExecStart=/usr/bin/python3 $INSTALL_DIR/src/volumeBeGone.py
 ExecStopPost=-/usr/bin/pkill -f l2ping
 ExecStopPost=-/usr/bin/pkill -f rfcomm
 Restart=on-failure
@@ -182,6 +178,6 @@ echo "Directorio: $INSTALL_DIR"
 echo
 echo "Next steps:"
 echo "1. Reboot: sudo reboot"
-echo "2. Test: python3 $INSTALL_DIR/volumeBeGone.py"
+echo "2. Test: python3 $INSTALL_DIR/src/volumeBeGone.py"
 echo "3. Auto-start: sudo systemctl enable volumebegone"
 echo
