@@ -29,15 +29,23 @@ echo -e "${YELLOW}[1/8] Updating system packages...${NC}"
 apt-get update 
 apt-get upgrade -y 
  
-# Install system dependencies 
-echo -e "${YELLOW}[2/8] Installing system dependencies...${NC}" 
-apt-get install -y \ 
-    python3-pip python3-dev python3-numpy \ 
-    bluetooth bluez libbluetooth-dev \ 
-    python3-smbus i2c-tools \ 
-    portaudio19-dev python3-pyaudio \ 
-    libatlas-base-dev python3-pil \ 
-    git python3-venv 
+# Install system dependencies
+echo -e "${YELLOW}[2/8] Installing system dependencies...${NC}"
+
+# Instalar paquetes base (siempre disponibles)
+apt-get install -y \
+    python3-pip python3-dev python3-numpy \
+    bluetooth bluez libbluetooth-dev \
+    python3-smbus i2c-tools \
+    libatlas-base-dev \
+    git python3-venv
+
+# Instalar paquetes de audio (nombres varían según versión de OS)
+apt-get install -y libportaudio2 || apt-get install -y portaudio19-dev || true
+apt-get install -y python3-pyaudio || true
+
+# Instalar PIL/Pillow (nombre varía según versión)
+apt-get install -y python3-pillow || apt-get install -y python3-pil || true 
  
 # Enable interfaces 
 echo -e "${YELLOW}[3/8] Enabling I2C and SPI interfaces...${NC}" 
