@@ -29,25 +29,58 @@ echo -e "${YELLOW}[1/8] Updating system packages...${NC}"
 apt-get update 
 apt-get upgrade -y 
  
-# Install system dependencies 
-echo -e "${YELLOW}[2/8] Installing system dependencies...${NC}" 
-apt-get install -y \ 
-    python3-pip python3-dev python3-numpy \ 
-    bluetooth bluez libbluetooth-dev \ 
-    python3-smbus i2c-tools \ 
-    portaudio19-dev python3-pyaudio \ 
-    libatlas-base-dev python3-pil \ 
-    git python3-venv 
+# Install system dependencies
+echo -e "${YELLOW}[2/8] Installing system dependencies...${NC}"
+
+# Detectar distribución
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    DISTRO=$ID
+    VERSION=$VERSION_CODENAME
+    echo -e "${YELLOW}Detectado: $DISTRO $VERSION${NC}"
+fi
+
+# Paquetes base comunes
+apt-get install -y \
+    python3-pip python3-dev python3-numpy \
+    bluetooth bluez libbluetooth-dev \
+    i2c-tools \
+    git python3-venv \
+    python3-pillow
+
+# Paquetes de audio - PortAudio
+apt-get install -y libportaudio2 || true
+apt-get install -y portaudio19-dev || apt-get install -y libportaudio-dev || true
+
+# SMBus (nombre varía)
+apt-get install -y python3-smbus || apt-get install -y python3-smbus2 || true
+
+# ATLAS/BLAS para numpy (opcional en Trixie)
+apt-get install -y libatlas-base-dev || apt-get install -y libopenblas-dev || true
+
+# Herramientas GPIO para Raspberry Pi (solo si está disponible)
+apt-get install -y python3-rpi.gpio || apt-get install -y python3-lgpio || true 
  
 # Enable interfaces 
 echo -e "${YELLOW}[3/8] Enabling I2C and SPI interfaces...${NC}" 
 raspi-config nonint do_i2c 0 
 raspi-config nonint do_spi 0 
  
-# Install Python dependencies 
-echo -e "${YELLOW}[4/8] Installing Python dependencies...${NC}" 
-pip3 install --upgrade pip 
-pip3 install -r requirements.txt 
+# Install Python dependencies
+echo -e "${YELLOW}[4/8] Installing Python dependencies...${NC}"
+
+# En Debian Trixie/Bookworm usar --break-system-packages o venv
+# Intentar instalar desde repositorios de sistema primero
+apt-get install -y python3-sounddevice python3-scipy python3-psutil || true
+
+# Para pybluez y Adafruit que no están en repos
+if [ -f /usr/lib/python3*/EXTERNALLY-MANAGED ]; then
+    echo -e "${YELLOW}Detectado PEP 668, usando --break-system-packages${NC}"
+    pip3 install --break-system-packages pybluez Adafruit-SSD1306 Adafruit-GPIO || true
+else
+    pip3 install --upgrade pip
+    pip3 install -r requirements.txt
+fi 
  
 # Create project directory
 echo -e "${YELLOW}[5/8] Creating project directory...${NC}"
