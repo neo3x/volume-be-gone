@@ -1,5 +1,11 @@
 # Documentacion de Hardware
 
+**Volume Be Gone v2.1**
+**Author:** Francisco Ortiz Rojas - Ingeniero Electronico
+**Contact:** francisco.ortiz@marfinex.com
+
+---
+
 ## Lista de materiales (BOM)
 
 ### Componentes principales

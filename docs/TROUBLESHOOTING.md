@@ -1,5 +1,11 @@
 # Guia de Solucion de Problemas
 
+**Volume Be Gone v2.1**
+**Author:** Francisco Ortiz Rojas - Ingeniero Electronico
+**Contact:** francisco.ortiz@marfinex.com
+
+---
+
 ## Problemas comunes y soluciones
 
 ### 1. Pantalla OLED no funciona

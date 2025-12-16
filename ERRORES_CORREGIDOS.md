@@ -1,6 +1,11 @@
-# 🔧 ERRORES CORREGIDOS - Volume Be Gone v2.1
+# ERRORES CORREGIDOS - Volume Be Gone v2.1
 
-## 📋 Resumen de Correcciones
+**Author:** Francisco Ortiz Rojas - Ingeniero Electronico
+**Contact:** francisco.ortiz@marfinex.com
+
+---
+
+## Resumen de Correcciones
 
 Se han corregido **11 errores críticos** y mejoras en el código:
 
