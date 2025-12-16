@@ -66,13 +66,54 @@ GPIO26  (37) o  o  (38)
 
 ## Carcasa 3D
 
-Los archivos STL para imprimir la carcasa estan en `/hardware/3d-models/`
+Los archivos para la carcasa estan en `/hardware/3d-models/`
+
+### Archivo fuente: `case.scad` (OpenSCAD)
+
+La carcasa esta diseñada parametricamente con OpenSCAD e incluye:
+
+- Acceso para alimentacion USB-C
+- Acceso para puertos Ethernet y USB
+- Hueco para pantalla OLED 128x64
+- Hueco para encoder rotativo KY-040
+- Orificios de ventilacion (inferior, lateral y superior)
+- Orificios de montaje para Raspberry Pi 4
+- Ranura para tarjeta SD
+- Texto grabado "Volume Be Gone v2.1"
+
+### Generar archivos STL:
+
+```bash
+# Instalar OpenSCAD
+sudo apt install openscad
+
+# Exportar base
+openscad -o case_base.stl -D 'part="base"' hardware/3d-models/case.scad
+
+# Exportar tapa
+openscad -o case_lid.stl -D 'part="lid"' hardware/3d-models/case.scad
+
+# Ver en GUI
+openscad hardware/3d-models/case.scad
+```
 
 ### Parametros de impresion recomendados:
-- Layer height: 0.2mm
-- Infill: 20%
-- Supports: Si (para los puertos USB)
-- Tiempo estimado: 3-4 horas
+
+| Parametro | Valor |
+|-----------|-------|
+| Material | PLA o PETG |
+| Layer height | 0.2mm |
+| Infill | 20-30% |
+| Paredes | 3 perimetros |
+| Soportes | Si (para puertos USB/Ethernet) |
+
+### Orientacion de impresion:
+- **Base:** Boca arriba (como se ve en el modelo)
+- **Tapa:** Boca abajo (invertida)
+
+### Tiempo estimado:
+- Base: 2-3 horas
+- Tapa: 1-2 horas
 
 ## Notas de ensamblaje
 
