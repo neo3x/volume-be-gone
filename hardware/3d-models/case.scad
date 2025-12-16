@@ -54,40 +54,39 @@ standoff_height = 5;
 standoff_outer = 6;
 
 // ============================================
-// DIMENSIONES PUERTOS RPi4
+// DIMENSIONES PUERTOS RPi4 (Verificado con specs oficiales)
+// Referencia: datasheets.raspberrypi.com/rpi4/raspberry-pi-4-mechanical-drawing.pdf
 // ============================================
 
-// USB-C Power (lado corto)
+// USB-C Power (lado corto, desde esquina SD card)
 usbc_width = 9;
 usbc_height = 3.5;
-usbc_y = 7.7;  // Desde borde
+usbc_pos = 11.2;  // Centro a 11.2mm desde esquina
 
-// Micro HDMI x2
-hdmi_width = 7;
+// Micro HDMI x2 (lado corto)
+hdmi_width = 7.8;
 hdmi_height = 3.5;
-hdmi1_y = 14.8;
-hdmi2_y = 28.2;
+hdmi1_pos = 26.0;   // HDMI0 - centro a 26mm desde esquina
+hdmi2_pos = 39.5;   // HDMI1 - centro a 39.5mm desde esquina
 
-// Audio jack 3.5mm
+// Audio jack 3.5mm (lado corto)
 audio_diameter = 7;
-audio_y = 53.5;
+audio_pos = 53.5;   // Centro a 53.5mm desde esquina
 
-// Ethernet (lado largo)
+// Ethernet RJ45 (lado largo, desde esquina audio)
 eth_width = 16;
 eth_height = 14;
-eth_x = 76;
+eth_pos = 10.25;    // Centro a 10.25mm desde esquina
 
-// USB 2.0 x2 (lado largo)
-usb2_width = 15;
-usb2_height = 16;
-usb2_1_x = 58;
-usb2_2_x = 40;
-
-// USB 3.0 x2 (lado largo, azules)
-usb3_width = 15;
+// USB 3.0 x2 apilados (lado largo, azules, junto a ethernet)
+usb3_width = 13.5;
 usb3_height = 16;
-usb3_1_x = 76;  // Mas cerca del ethernet
-usb3_2_x = 58;
+usb3_pos = 29;      // Centro a 29mm desde esquina
+
+// USB 2.0 x2 apilados (lado largo, negros, mas lejos de ethernet)
+usb2_width = 13.5;
+usb2_height = 16;
+usb2_pos = 47;      // Centro a 47mm desde esquina
 
 // ============================================
 // DIMENSIONES PANTALLA OLED
@@ -186,43 +185,45 @@ module case_base() {
         rounded_box(inner_length, inner_width, base_height, r=2);
 
         // === PUERTOS LADO USB-C (frontal, Y=0) ===
+        // Posiciones medidas desde esquina PCB + clearance + wall
 
-        // USB-C Power
-        translate([wall + clearance + usbc_y, -1, wall + standoff_height])
+        // USB-C Power (centro a 11.2mm desde esquina)
+        translate([wall + clearance + usbc_pos, -1, wall + standoff_height])
         rotate([-90, 0, 0])
         rounded_slot(usbc_width + tolerance*2, usbc_height + tolerance*2, wall+2);
 
-        // Micro HDMI 1
-        translate([wall + clearance + hdmi1_y, -1, wall + standoff_height])
+        // Micro HDMI 0 (centro a 26mm desde esquina)
+        translate([wall + clearance + hdmi1_pos, -1, wall + standoff_height])
         rotate([-90, 0, 0])
         rounded_slot(hdmi_width + tolerance*2, hdmi_height + tolerance*2, wall+2);
 
-        // Micro HDMI 2
-        translate([wall + clearance + hdmi2_y, -1, wall + standoff_height])
+        // Micro HDMI 1 (centro a 39.5mm desde esquina)
+        translate([wall + clearance + hdmi2_pos, -1, wall + standoff_height])
         rotate([-90, 0, 0])
         rounded_slot(hdmi_width + tolerance*2, hdmi_height + tolerance*2, wall+2);
 
-        // Audio jack
-        translate([wall + clearance + audio_y, -1, wall + standoff_height + 2])
+        // Audio jack (centro a 53.5mm desde esquina)
+        translate([wall + clearance + audio_pos, -1, wall + standoff_height + 2])
         rotate([-90, 0, 0])
         cylinder(d=audio_diameter + tolerance*2, h=wall+2);
 
-        // === PUERTOS LADO ETHERNET/USB (derecho, X=max) ===
+        // === PUERTOS LADO ETHERNET/USB (lado largo, X=max) ===
+        // Posiciones medidas desde esquina opuesta al GPIO
 
-        // Ethernet
-        translate([outer_length - wall - 1, wall + clearance + 2, wall + standoff_height])
+        // Ethernet RJ45 (centro a 10.25mm desde esquina)
+        translate([outer_length - wall - 1, wall + clearance + eth_pos, wall + standoff_height])
         rotate([0, 90, 0])
         rotate([0, 0, 90])
         rounded_slot(eth_width + tolerance*2, eth_height + tolerance*2, wall+2);
 
-        // USB 3.0 (los azules, mas cerca del ethernet)
-        translate([outer_length - wall - 1, wall + clearance + 22, wall + standoff_height])
+        // USB 3.0 x2 apilados (centro a 29mm desde esquina)
+        translate([outer_length - wall - 1, wall + clearance + usb3_pos, wall + standoff_height])
         rotate([0, 90, 0])
         rotate([0, 0, 90])
         rounded_slot(usb3_width + tolerance*2, usb3_height + tolerance*2, wall+2);
 
-        // USB 2.0
-        translate([outer_length - wall - 1, wall + clearance + 40, wall + standoff_height])
+        // USB 2.0 x2 apilados (centro a 47mm desde esquina)
+        translate([outer_length - wall - 1, wall + clearance + usb2_pos, wall + standoff_height])
         rotate([0, 90, 0])
         rotate([0, 0, 90])
         rounded_slot(usb2_width + tolerance*2, usb2_height + tolerance*2, wall+2);
