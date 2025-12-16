@@ -1,5 +1,11 @@
 # Guia de Instalacion Detallada
 
+**Volume Be Gone v2.1**
+**Author:** Francisco Ortiz Rojas - Ingeniero Electronico
+**Contact:** francisco.ortiz@marfinex.com
+
+---
+
 ## Requisitos previos
 
 - Raspberry Pi 3B+ o 4 con Raspberry Pi OS instalado

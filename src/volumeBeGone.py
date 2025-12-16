@@ -5,9 +5,13 @@ Volume Be Gone - Bluetooth Speaker Control by Volume Level
 Control automatico de parlantes Bluetooth basado en nivel de volumen ambiental.
 Utiliza un encoder rotativo para configurar el umbral de activacion.
 
-Author: Educational Research Project
+Author: Francisco Ortiz Rojas
+        Ingeniero Electronico
+        francisco.ortiz@marfinex.com
+
 License: MIT
-Version: 2.1 (Corregido)
+Version: 2.1
+Date: Diciembre 2025
 
 Basado en Reggaeton Be Gone de Roni Bandini
 """

@@ -1,8 +1,14 @@
-# volume-be-gone 🔇
+# Volume Be Gone
 
 Control automatico de parlantes Bluetooth por nivel de volumen usando Raspberry Pi
 
-## 🎯 Descripcion
+**Author:** Francisco Ortiz Rojas - Ingeniero Electronico
+**Contact:** francisco.ortiz@marfinex.com
+**Version:** 2.1 | **Date:** Diciembre 2025
+
+---
+
+## Descripcion
 
 Volume Be Gone es un dispositivo basado en Raspberry Pi que monitorea el nivel de ruido ambiental y automaticamente intenta desconectar parlantes Bluetooth cercanos cuando el volumen supera un umbral configurable (70-120 dB).
 
@@ -113,12 +119,20 @@ sudo systemctl stop volumebegone
 sudo systemctl disable volumebegone
 ```
 
-## 📄 Licencia
+## Licencia
 
 Este proyecto esta bajo la Licencia MIT - ver LICENSE para detalles.
 
-## 🙏 Creditos
+## Creditos
 
+**Desarrollado por:**
+- **Francisco Ortiz Rojas** - Ingeniero Electronico
+- **Email:** francisco.ortiz@marfinex.com
+
+**Agradecimientos:**
 - Inspirado en "Reggaeton Be Gone" de Roni Bandini
 - Comunidad Raspberry Pi
 - Libreria Adafruit para displays OLED
+
+---
+*Volume Be Gone v2.1 - Diciembre 2025*

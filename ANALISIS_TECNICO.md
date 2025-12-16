@@ -1,6 +1,12 @@
-# 🔬 ANÁLISIS TÉCNICO - Volume Be Gone
+# ANALISIS TECNICO - Volume Be Gone
 
-## 📌 Resumen Ejecutivo
+**Volume Be Gone v2.1**
+**Author:** Francisco Ortiz Rojas - Ingeniero Electronico
+**Contact:** francisco.ortiz@marfinex.com
+
+---
+
+## Resumen Ejecutivo
 
 Este código implementa un sistema de **ataque de denegación de servicio (DoS) Bluetooth** activado por niveles de volumen ambiental. Es una herramienta de investigación de seguridad que demuestra vulnerabilidades en dispositivos Bluetooth de audio.
 

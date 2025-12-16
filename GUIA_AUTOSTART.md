@@ -1,6 +1,12 @@
-# 🚀 Guía de Auto-Inicio - Volume Be Gone
+# Guia de Auto-Inicio - Volume Be Gone
 
-## 📋 Resumen
+**Volume Be Gone v2.1**
+**Author:** Francisco Ortiz Rojas - Ingeniero Electronico
+**Contact:** francisco.ortiz@marfinex.com
+
+---
+
+## Resumen
 
 Esta guía explica cómo configurar **Volume Be Gone** para que se inicie automáticamente al encender tu Raspberry Pi, mostrando el progreso de carga en la pantalla OLED.
 
@@ -437,6 +443,8 @@ A: `sudo systemctl stop volumebegone`
 
 ---
 
-**Versión:** 2.1
-**Última actualización:** 2025-11-02
+---
+**Version:** 2.1
+**Ultima actualizacion:** 2025-12-15
+**Author:** Francisco Ortiz Rojas - Ingeniero Electronico
 **Auto-inicio implementado con systemd**

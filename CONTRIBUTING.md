@@ -1,5 +1,11 @@
-# Contributing to Volume Be Gone 
- 
+# Contributing to Volume Be Gone
+
+**Volume Be Gone v2.1**
+**Author:** Francisco Ortiz Rojas - Ingeniero Electronico
+**Contact:** francisco.ortiz@marfinex.com
+
+---
+
 First off, thank you for considering contributing to Volume Be Gone 
  
 ## How to Contribute 
