@@ -86,17 +86,105 @@ apt-get install -y python3-rpi.gpio 2>/dev/null || apt-get install -y python3-lg
 apt-get install -y python3-bluez 2>/dev/null || true
 
 # Enable interfaces
-echo -e "${YELLOW}[4/8] Enabling I2C and SPI interfaces...${NC}"
-if command -v raspi-config &> /dev/null; then
-    raspi-config nonint do_i2c 0 2>/dev/null || true
-    raspi-config nonint do_spi 0 2>/dev/null || true
+echo -e "${YELLOW}[4/8] Enabling I2C, SPI and GPIO interfaces...${NC}"
+
+# Detectar archivo de configuración de boot
+if [ -f /boot/firmware/config.txt ]; then
+    BOOT_CONFIG="/boot/firmware/config.txt"
+elif [ -f /boot/config.txt ]; then
+    BOOT_CONFIG="/boot/config.txt"
 else
-    echo -e "${YELLOW}raspi-config no encontrado, habilitando manualmente...${NC}"
-    modprobe i2c-dev 2>/dev/null || true
-    modprobe spi-bcm2835 2>/dev/null || true
-    # Asegurar que se carguen al inicio
-    grep -q "i2c-dev" /etc/modules || echo "i2c-dev" >> /etc/modules
+    BOOT_CONFIG=""
 fi
+
+if [ -n "$BOOT_CONFIG" ]; then
+    echo -e "${YELLOW}Configurando $BOOT_CONFIG...${NC}"
+
+    # Habilitar I2C
+    if ! grep -q "^dtparam=i2c_arm=on" "$BOOT_CONFIG"; then
+        echo "dtparam=i2c_arm=on" >> "$BOOT_CONFIG"
+        echo -e "${GREEN}  [+] I2C habilitado${NC}"
+    else
+        echo -e "${GREEN}  [OK] I2C ya estaba habilitado${NC}"
+    fi
+
+    # Habilitar SPI
+    if ! grep -q "^dtparam=spi=on" "$BOOT_CONFIG"; then
+        echo "dtparam=spi=on" >> "$BOOT_CONFIG"
+        echo -e "${GREEN}  [+] SPI habilitado${NC}"
+    else
+        echo -e "${GREEN}  [OK] SPI ya estaba habilitado${NC}"
+    fi
+
+    # Habilitar I2C baudrate más alto (opcional, para pantalla OLED)
+    if ! grep -q "^dtparam=i2c_arm_baudrate" "$BOOT_CONFIG"; then
+        echo "dtparam=i2c_arm_baudrate=400000" >> "$BOOT_CONFIG"
+        echo -e "${GREEN}  [+] I2C baudrate 400kHz configurado${NC}"
+    fi
+else
+    echo -e "${YELLOW}Archivo de configuración de boot no encontrado${NC}"
+fi
+
+# Configurar módulos del kernel para que carguen al inicio
+echo -e "${YELLOW}Configurando módulos del kernel...${NC}"
+
+# I2C
+if ! grep -q "^i2c-dev" /etc/modules; then
+    echo "i2c-dev" >> /etc/modules
+    echo -e "${GREEN}  [+] Módulo i2c-dev agregado${NC}"
+fi
+
+if ! grep -q "^i2c-bcm2835" /etc/modules; then
+    echo "i2c-bcm2835" >> /etc/modules
+    echo -e "${GREEN}  [+] Módulo i2c-bcm2835 agregado${NC}"
+fi
+
+# SPI
+if ! grep -q "^spi-bcm2835" /etc/modules; then
+    echo "spi-bcm2835" >> /etc/modules
+    echo -e "${GREEN}  [+] Módulo spi-bcm2835 agregado${NC}"
+fi
+
+# GPIO (para el encoder)
+if ! grep -q "^gpio-bcm2835" /etc/modules 2>/dev/null; then
+    echo "gpio-bcm2835" >> /etc/modules 2>/dev/null || true
+fi
+
+# Cargar módulos ahora (sin reiniciar)
+echo -e "${YELLOW}Cargando módulos...${NC}"
+modprobe i2c-dev 2>/dev/null || true
+modprobe i2c-bcm2835 2>/dev/null || true
+modprobe spi-bcm2835 2>/dev/null || true
+
+# Verificar que I2C está funcionando
+if [ -e /dev/i2c-1 ]; then
+    echo -e "${GREEN}  [OK] /dev/i2c-1 disponible${NC}"
+else
+    echo -e "${YELLOW}  [!] /dev/i2c-1 no disponible - reinicio requerido${NC}"
+fi
+
+# Configurar permisos de dispositivos GPIO y I2C
+echo -e "${YELLOW}Configurando reglas udev para GPIO e I2C...${NC}"
+cat > /etc/udev/rules.d/99-gpio-i2c.rules << 'UDEVEOF'
+# Reglas para GPIO
+SUBSYSTEM=="gpio", KERNEL=="gpiochip*", MODE="0660", GROUP="gpio"
+SUBSYSTEM=="gpio", KERNEL=="gpio*", MODE="0660", GROUP="gpio"
+
+# Reglas para I2C
+SUBSYSTEM=="i2c-dev", MODE="0660", GROUP="i2c"
+
+# Reglas para SPI
+SUBSYSTEM=="spidev", MODE="0660", GROUP="spi"
+UDEVEOF
+
+# Crear grupos si no existen
+getent group gpio || groupadd gpio
+getent group i2c || groupadd i2c
+getent group spi || groupadd spi
+
+# Recargar reglas udev
+udevadm control --reload-rules 2>/dev/null || true
+udevadm trigger 2>/dev/null || true
 
 # Install Python dependencies
 echo -e "${YELLOW}[5/8] Installing Python dependencies...${NC}"
@@ -125,9 +213,10 @@ chown -R "$REAL_USER:$REAL_USER" "$INSTALL_DIR"
 
 # Configure permissions
 echo -e "${YELLOW}[7/8] Configuring permissions...${NC}"
-usermod -a -G bluetooth,audio,i2c,gpio "$REAL_USER" 2>/dev/null || true
-usermod -a -G dialout "$REAL_USER" 2>/dev/null || true
+usermod -a -G bluetooth,audio,i2c,gpio,spi,dialout "$REAL_USER" 2>/dev/null || true
 setcap 'cap_net_raw,cap_net_admin+eip' $(which python3) 2>/dev/null || true
+
+echo -e "${GREEN}Usuario $REAL_USER agregado a grupos: bluetooth, audio, i2c, gpio, spi, dialout${NC}"
 
 # Enable Bluetooth service
 systemctl enable bluetooth 2>/dev/null || true
