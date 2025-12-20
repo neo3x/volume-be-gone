@@ -12,9 +12,8 @@ pybluez>=0.23
 # GPIO and Hardware
 RPi.GPIO>=0.7.1
 
-# Display
-Adafruit-SSD1306>=1.6.2
-Adafruit-GPIO>=1.0.3
+# Display (luma.oled es compatible con Debian Trixie)
+luma.oled>=3.13.0
 Pillow>=10.0.0
 
 # System

@@ -21,18 +21,28 @@ try:
 except Exception as e:
     print(f"[X] GPIO Error: {e}")
 
-# Test 2: I2C Display
+# Test 2: I2C Display (usando luma.oled - compatible con Debian Trixie)
 print("\n[TEST] OLED Display...")
 try:
-    import Adafruit_SSD1306
-    from PIL import Image, ImageDraw, ImageFont
-    disp = Adafruit_SSD1306.SSD1306_128_64(rst=None)
-    disp.begin()
-    disp.clear()
-    disp.display()
-    print("[OK] OLED display initialized")
+    from luma.core.interface.serial import i2c
+    from luma.oled.device import ssd1306
+    from PIL import Image, ImageDraw
+
+    # Conectar al display via I2C
+    serial = i2c(port=1, address=0x3C)
+    disp = ssd1306(serial, width=128, height=64)
+
+    # Crear imagen de prueba
+    image = Image.new('1', (128, 64))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 127, 63), outline=0, fill=0)
+    draw.text((10, 25), "Test OK!", fill=255)
+    disp.display(image)
+
+    print("[OK] OLED display initialized (luma.oled)")
 except Exception as e:
     print(f"[X] Display Error: {e}")
+    print("    Verifica: I2C habilitado, direccion 0x3C o 0x3D")
 
 # Test 3: Bluetooth
 print("\n[TEST] Bluetooth...")

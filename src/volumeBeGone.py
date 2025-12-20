@@ -25,8 +25,8 @@ import datetime
 import numpy as np
 import sounddevice as sd
 from RPi import GPIO
-import Adafruit_GPIO.SPI as SPI
-import Adafruit_SSD1306
+from luma.core.interface.serial import i2c
+from luma.oled.device import ssd1306
 from PIL import Image
 from PIL import ImageDraw
 from PIL import ImageFont
@@ -79,17 +79,19 @@ encoder_counter = 0
 last_encoder_time = 0
 fast_rotation_threshold = 0.05  # 50ms para detectar giro rápido
 
-# Oled screen
-RST = None
-DC = 23
-SPI_PORT = 0
-SPI_DEVICE = 0
+# Oled screen (luma.oled - compatible con Debian Trixie)
+# Configuracion I2C para SSD1306 128x64
+I2C_PORT = 1        # Bus I2C (1 para RPi 2/3/4)
+I2C_ADDRESS = 0x3C  # Direccion I2C del display (puede ser 0x3D en algunos)
 
-# Inicializar pantalla
-disp = Adafruit_SSD1306.SSD1306_128_64(rst=RST)
-disp.begin()
-disp.clear()
-disp.display()
+# Inicializar pantalla con luma.oled
+try:
+    serial = i2c(port=I2C_PORT, address=I2C_ADDRESS)
+    disp = ssd1306(serial, width=128, height=64)
+except Exception as e:
+    print(f"[!] Error inicializando display: {e}")
+    print("[!] Verifica que I2C este habilitado y el display conectado")
+    sys.exit(1)
 
 # Cargar fuente con fallback
 font_path = myPath + 'whitrabt.ttf'
@@ -106,11 +108,9 @@ except Exception as e:
     font = ImageFont.load_default()
     font_small = ImageFont.load_default()
 
+# Dimensiones del display (luma.oled usa .size)
 width = disp.width
 height = disp.height
-image = Image.new('1', (width, height))
-draw = ImageDraw.Draw(image)
-draw.rectangle((0,0,width,height), outline=0, fill=0)
 padding = -2
 top = padding
 bottom = height-padding
@@ -219,8 +219,7 @@ def update_config_screen():
     # Instrucciones
     draw.text((x, top+56), "Gira:Ajustar OK:Iniciar", font=font_small, fill=255)
     
-    disp.image(image)
-    disp.display()
+    disp.display(image)
 
 def show_boot_screen(step, total_steps, message):
     """Muestra pantalla de carga con barra de progreso"""
@@ -254,8 +253,7 @@ def show_boot_screen(step, total_steps, message):
     percent = int((step / total_steps) * 100)
     draw.text((x+50, top+40), f"{percent}%", font=font_small, fill=255)
 
-    disp.image(image)
-    disp.display()
+    disp.display(image)
 
 def show_status_screen(status, details="", icon=""):
     """Muestra pantalla de estado simple"""
@@ -280,8 +278,7 @@ def show_status_screen(status, details="", icon=""):
     if details:
         draw.text((x, top+40), details[:20], font=font_small, fill=255)
 
-    disp.image(image)
-    disp.display()
+    disp.display(image)
 
 def writeLog(myLine):
     """Escribe en el archivo de log"""
@@ -312,8 +309,7 @@ def updateScreen(message1, message2, message3="", message4=""):
     if message4:
         draw.text((x, top+52), message4, font=font_small, fill=255)
     
-    disp.image(image)
-    disp.display()
+    disp.display(image)
 
 def draw_volume_meter(db_level):
     """Dibuja un medidor visual del nivel de volumen"""
@@ -351,8 +347,7 @@ def draw_volume_meter(db_level):
     status = "ACTIVO!" if db_level > threshold_db else "Monitoreando"
     draw.text((x, top+54), f"Disp:{len(bt_devices)} {status}", font=font_small, fill=255)
     
-    disp.image(image)
-    disp.display()
+    disp.display(image)
 
 def check_bluetooth_adapters():
     """Verifica adaptadores Bluetooth disponibles"""
@@ -729,8 +724,7 @@ def main():
     try:
         if os.path.exists(logo_path):
             image = Image.open(logo_path).convert('1')
-            disp.image(image)
-            disp.display()
+            disp.display(image)
             time.sleep(1.5)
         else:
             print(f"[*] Logo no encontrado, omitiendo...")
