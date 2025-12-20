@@ -132,7 +132,7 @@ Este proyecto esta bajo la Licencia MIT - ver LICENSE para detalles.
 **Agradecimientos:**
 - Inspirado en "Reggaeton Be Gone" de Roni Bandini
 - Comunidad Raspberry Pi
-- Libreria Adafruit para displays OLED
+- Libreria luma.oled para displays OLED (compatible con Debian Trixie)
 
 ---
 *Volume Be Gone v2.1 - Diciembre 2025*

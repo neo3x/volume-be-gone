@@ -201,7 +201,7 @@ Al encender:
 sudo journalctl -u volumebegone -n 50 --no-pager
 
 # Verificar que Python encuentra las librerías
-sudo -u pi python3 -c "import bluetooth, sounddevice, Adafruit_SSD1306"
+python3 -c "from luma.oled.device import ssd1306; import bluetooth, sounddevice"
 
 # Verificar permisos
 ls -la /home/pi/volumebegone/volumeBeGone.py

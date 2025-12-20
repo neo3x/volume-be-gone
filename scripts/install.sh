@@ -189,7 +189,7 @@ udevadm trigger 2>/dev/null || true
 # Install Python dependencies
 echo -e "${YELLOW}[5/8] Installing Python dependencies...${NC}"
 
-# Instalar sounddevice y Adafruit con pip (no están en repos de Trixie)
+# Instalar dependencias pip (no están en repos de Trixie)
 PIP_ARGS=""
 if [ -f /usr/lib/python3*/EXTERNALLY-MANAGED ] || [ -f /usr/lib/python3.*/EXTERNALLY-MANAGED ]; then
     echo -e "${YELLOW}Detectado PEP 668, usando --break-system-packages${NC}"
@@ -199,8 +199,8 @@ fi
 # sounddevice (no está en repos de Trixie)
 pip3 install $PIP_ARGS sounddevice || true
 
-# Adafruit SSD1306 y GPIO
-pip3 install $PIP_ARGS Adafruit-SSD1306 Adafruit-GPIO || true
+# luma.oled para display SSD1306 (reemplaza Adafruit-SSD1306, compatible con Trixie)
+pip3 install $PIP_ARGS luma.oled || true
 
 # Setup project directory
 echo -e "${YELLOW}[6/8] Setting up project directory...${NC}"
