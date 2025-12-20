@@ -89,15 +89,40 @@ usb2_height = 16;
 usb2_pos = 47;      // Centro a 47mm desde esquina
 
 // ============================================
-// DIMENSIONES PANTALLA OLED
+// DIMENSIONES PANTALLA OLED SSD1306 0.96" 128x64
+// Nota: Las medidas pueden variar segun fabricante. Mide tu modulo!
+// Referencia: Modulo generico 4-pin I2C (mas comun)
 // ============================================
 
-// OLED 128x64 0.96" I2C (tipico)
-oled_width = 27;
-oled_height = 27;
-oled_screen_width = 25;
-oled_screen_height = 14;
-oled_mounting_holes = 2.5;
+// PCB del modulo OLED
+oled_pcb_width = 27.3;      // Ancho PCB (puede ser 26-28mm)
+oled_pcb_height = 27.8;     // Alto PCB (puede ser 27-28mm)
+oled_pcb_thickness = 1.2;   // Grosor PCB
+
+// Area visible del display
+oled_screen_width = 21.7;   // Ancho area visible
+oled_screen_height = 10.8;  // Alto area visible
+oled_screen_offset_x = 2.8; // Offset desde borde izquierdo del PCB
+oled_screen_offset_y = 4.5; // Offset desde borde inferior (lado pines)
+
+// Orificios de montaje (4 esquinas)
+oled_hole_diameter = 2.2;   // Diametro para tornillos M2
+oled_hole_spacing_x = 23.0; // Distancia horizontal entre centros
+oled_hole_spacing_y = 23.5; // Distancia vertical entre centros
+oled_hole_edge_offset = 2.0; // Distancia del centro del orificio al borde
+
+// Posiciones de orificios (desde esquina inferior izquierda del PCB)
+oled_holes = [
+    [oled_hole_edge_offset, oled_hole_edge_offset],
+    [oled_pcb_width - oled_hole_edge_offset, oled_hole_edge_offset],
+    [oled_hole_edge_offset, oled_pcb_height - oled_hole_edge_offset],
+    [oled_pcb_width - oled_hole_edge_offset, oled_pcb_height - oled_hole_edge_offset]
+];
+
+// Alias para compatibilidad
+oled_width = oled_pcb_width;
+oled_height = oled_pcb_height;
+oled_mounting_holes = oled_hole_diameter;
 
 // ============================================
 // DIMENSIONES ENCODER KY-040
