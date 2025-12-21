@@ -19,6 +19,12 @@ Basado en Reggaeton Be Gone de Roni Bandini
 import os
 import subprocess
 import sys
+
+# Forzar UTF-8 en stdout/stderr para caracteres especiales
+if sys.stdout.encoding != 'utf-8':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 import signal
 import time
 import datetime
@@ -284,34 +290,35 @@ def encoder_button_callback(channel):
                 time.sleep(0.1)
 
 def update_config_screen():
-    """Actualiza la pantalla en modo configuración con barra visual"""
+    """Actualiza la pantalla en modo configuracion con barra visual"""
     image = Image.new('1', (width, height))
     draw = ImageDraw.Draw(image)
     draw.rectangle((0,0,width,height), outline=0, fill=0)
-    
-    # Título
+
+    # Titulo
     draw.text((x, top+2), "Volume BeGone", font=font, fill=255)
     draw.text((x, top+14), "Config. Umbral:", font=font, fill=255)
-    
+
     # Valor actual grande
     draw.text((x+30, top+28), f"{threshold_db} dB", font=font, fill=255)
-    
+
     # Barra de progreso
     bar_y = top + 45
     bar_height = 8
     bar_width = 120
     bar_x = 4
-    
+
     # Marco de la barra
     draw.rectangle((bar_x, bar_y, bar_x + bar_width, bar_y + bar_height), outline=255, fill=0)
-    
-    # Relleno de la barra
+
+    # Relleno de la barra (solo si hay progreso)
     fill_width = int((threshold_db - min_threshold_db) * bar_width / (max_threshold_db - min_threshold_db))
-    draw.rectangle((bar_x + 2, bar_y + 2, bar_x + fill_width, bar_y + bar_height - 2), outline=255, fill=255)
-    
+    if fill_width > 2:
+        draw.rectangle((bar_x + 2, bar_y + 2, bar_x + fill_width, bar_y + bar_height - 2), outline=255, fill=255)
+
     # Instrucciones
     draw.text((x, top+56), "Gira:Ajustar OK:Iniciar", font=font_small, fill=255)
-    
+
     disp.display(image)
 
 def show_boot_screen(step, total_steps, message):
