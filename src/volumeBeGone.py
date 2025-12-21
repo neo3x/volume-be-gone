@@ -116,66 +116,108 @@ top = padding
 bottom = height-padding
 x = 0
 
-def setup_encoder():
-    """Configura el encoder rotativo"""
-    # Limpiar GPIO completamente antes de configurar (evita RuntimeError)
-    try:
-        GPIO.cleanup()
-    except:
-        pass
+# Variable global para controlar el thread del encoder
+encoder_running = False
 
-    # Reconfigurar modo GPIO después del cleanup
+def setup_encoder():
+    """Configura el encoder rotativo usando polling (más confiable que interrupciones)"""
+    global encoder_running
+
+    # Configurar GPIO
     GPIO.setwarnings(False)
     GPIO.setmode(GPIO.BCM)
-
-    # Limpiar cualquier evento anterior en estos pines específicos
-    for pin in [encoder_clk, encoder_dt, encoder_sw]:
-        try:
-            GPIO.remove_event_detect(pin)
-        except:
-            pass
-
-    # Pequeña pausa para que el kernel libere los recursos
-    time.sleep(0.1)
 
     GPIO.setup(encoder_clk, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(encoder_dt, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(encoder_sw, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-    # Pequeña pausa después de configurar los pines
-    time.sleep(0.1)
+    # Iniciar thread de polling para el encoder
+    encoder_running = True
+    encoder_thread = threading.Thread(target=encoder_polling_thread, daemon=True)
+    encoder_thread.start()
+    print("[*] Encoder configurado (modo polling)")
 
-    # Configurar interrupciones con reintentos
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            GPIO.add_event_detect(encoder_clk, GPIO.BOTH, callback=encoder_rotation_callback, bouncetime=50)
-            break
-        except RuntimeError as e:
-            if attempt < max_retries - 1:
-                print(f"[!] Reintentando configurar encoder_clk (intento {attempt + 2}/{max_retries})...")
-                time.sleep(0.5)
-                try:
-                    GPIO.remove_event_detect(encoder_clk)
-                except:
-                    pass
-            else:
-                raise RuntimeError(f"No se pudo configurar detección en encoder_clk después de {max_retries} intentos: {e}")
+def encoder_polling_thread():
+    """Thread que lee el encoder por polling (evita problemas con add_event_detect)"""
+    global threshold_db, encoder_last_clk, last_encoder_time, config_mode, monitoring, encoder_running
 
-    for attempt in range(max_retries):
+    last_clk = GPIO.input(encoder_clk)
+    last_sw = GPIO.HIGH
+    button_press_time = 0
+
+    while encoder_running:
         try:
-            GPIO.add_event_detect(encoder_sw, GPIO.FALLING, callback=encoder_button_callback, bouncetime=300)
-            break
-        except RuntimeError as e:
-            if attempt < max_retries - 1:
-                print(f"[!] Reintentando configurar encoder_sw (intento {attempt + 2}/{max_retries})...")
-                time.sleep(0.5)
-                try:
-                    GPIO.remove_event_detect(encoder_sw)
-                except:
-                    pass
-            else:
-                raise RuntimeError(f"No se pudo configurar detección en encoder_sw después de {max_retries} intentos: {e}")
+            # Leer estado actual
+            clk_state = GPIO.input(encoder_clk)
+            dt_state = GPIO.input(encoder_dt)
+            sw_state = GPIO.input(encoder_sw)
+
+            # Detectar rotación del encoder
+            if clk_state != last_clk:
+                if clk_state == GPIO.LOW:
+                    current_time = time.time()
+                    time_diff = current_time - last_encoder_time
+
+                    if config_mode:
+                        # Determinar velocidad de rotación
+                        if time_diff < fast_rotation_threshold:
+                            step = 5  # Giro rápido
+                        else:
+                            step = 1  # Giro lento
+
+                        if dt_state != clk_state:
+                            # Giro horario - aumentar
+                            if threshold_db < max_threshold_db:
+                                threshold_db = min(threshold_db + step, max_threshold_db)
+                                update_config_screen()
+                        else:
+                            # Giro antihorario - disminuir
+                            if threshold_db > min_threshold_db:
+                                threshold_db = max(threshold_db - step, min_threshold_db)
+                                update_config_screen()
+
+                        last_encoder_time = current_time
+
+                last_clk = clk_state
+
+            # Detectar botón del encoder
+            if sw_state != last_sw:
+                if sw_state == GPIO.LOW:
+                    # Botón presionado
+                    button_press_time = time.time()
+                else:
+                    # Botón liberado
+                    if button_press_time > 0:
+                        press_duration = time.time() - button_press_time
+                        if press_duration < 2:
+                            # Presión corta: confirmar configuración
+                            if config_mode:
+                                config_mode = False
+                                save_config()
+                                print(f"[*] Configuración confirmada: {threshold_db} dB")
+                        # Presión larga se maneja abajo
+                        button_press_time = 0
+
+                last_sw = sw_state
+
+            # Verificar presión larga del botón (reset)
+            if sw_state == GPIO.LOW and button_press_time > 0:
+                if time.time() - button_press_time > 2:
+                    if monitoring:
+                        print("[*] Reiniciando...")
+                        monitoring = False
+                        encoder_running = False
+                        os.system("pkill -f l2ping")
+                        os.system("pkill -f rfcomm")
+                        time.sleep(1)
+                        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+            # Pequeña pausa para no saturar CPU (2ms = respuesta rápida)
+            time.sleep(0.002)
+
+        except Exception as e:
+            print(f"[!] Error en encoder polling: {e}")
+            time.sleep(0.1)
 
 def encoder_rotation_callback(channel):
     """Maneja la rotación del encoder"""
@@ -683,22 +725,23 @@ def monitor_volume():
 
 def signal_handler(sig, frame):
     """Maneja la interrupción del programa"""
-    global monitoring
+    global monitoring, encoder_running
     print('\n[*] Interrumpido')
     writeLog("Interrumpido")
     monitoring = False
-    
+    encoder_running = False
+
     # Detener todos los procesos de ataque
     os.system("pkill -f l2ping")
     os.system("pkill -f rfcomm")
-    
+
     GPIO.cleanup()
     sys.exit(0)
 
 signal.signal(signal.SIGINT, signal_handler)
 
 def main():
-    global monitoring, bt_devices, config_mode, threshold_db, bt_interface
+    global monitoring, bt_devices, config_mode, threshold_db, bt_interface, encoder_running
 
     print("")
     print("Volume Be Gone 2.1 - Auto-Start Edition")
@@ -833,6 +876,7 @@ def main():
         writeLog(f"Error en monitoreo: {str(e)}")
     finally:
         monitoring = False
+        encoder_running = False
         os.system("pkill -f l2ping")
         os.system("pkill -f rfcomm")
         GPIO.cleanup()
