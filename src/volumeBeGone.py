@@ -53,7 +53,7 @@ log_path = myPath + "log.txt"
 threshold_db = 70  # Umbral inicial en decibeles
 min_threshold_db = 70  # Umbral mínimo
 max_threshold_db = 120  # Umbral máximo
-packagesSize = 800
+packagesSize = 600  # Reducido de 800 para evitar "Message too long" (MTU ~672)
 threadsCount = 1000
 myDelay = 0.1
 sample_rate = 44100
@@ -125,6 +125,11 @@ x = 0
 
 # Variable global para controlar el thread del encoder
 encoder_running = False
+
+# Variables para actualización asíncrona del display
+display_db_level = 0.0
+display_update_needed = False
+display_lock = threading.Lock()
 
 def setup_encoder():
     """Configura el encoder rotativo usando polling (más confiable que interrupciones)"""
@@ -375,42 +380,73 @@ def updateScreen(message1, message2, message3="", message4=""):
 
 def draw_volume_meter(db_level):
     """Dibuja un medidor visual del nivel de volumen"""
-    image = Image.new('1', (width, height))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0,0,width,height), outline=0, fill=0)
+    try:
+        image = Image.new('1', (width, height))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0,0,width,height), outline=0, fill=0)
 
-    # Titulo con estado
-    status = "ACTIVO!" if db_level > threshold_db else ""
-    draw.text((x, top+2), f"VBG {status}", font=font, fill=255)
+        # Titulo con estado
+        status = "ACTIVO!" if db_level > threshold_db else ""
+        draw.text((x, top+2), f"VBG {status}", font=font, fill=255)
 
-    # Nivel actual y umbral
-    draw.text((x, top+14), f"Nivel: {db_level:.1f} dB", font=font, fill=255)
-    draw.text((x, top+26), f"Umbral: {threshold_db} dB", font=font, fill=255)
+        # Nivel actual y umbral
+        draw.text((x, top+14), f"Nivel: {db_level:.1f} dB", font=font, fill=255)
+        draw.text((x, top+26), f"Umbral: {threshold_db} dB", font=font, fill=255)
 
-    # Medidor visual
-    meter_y = top + 40
-    meter_height = 10
-    meter_width = 120
-    meter_x = 4
+        # Medidor visual
+        meter_y = top + 40
+        meter_height = 10
+        meter_width = 120
+        meter_x = 4
 
-    # Marco del medidor
-    draw.rectangle((meter_x, meter_y, meter_x + meter_width, meter_y + meter_height), outline=255, fill=0)
+        # Marco del medidor
+        draw.rectangle((meter_x, meter_y, meter_x + meter_width, meter_y + meter_height), outline=255, fill=0)
 
-    # Nivel actual (proteger contra valores negativos)
-    if db_level > 0:
-        level_width = int(min(db_level, 120) * meter_width / 120)
-        if level_width > 2:
-            draw.rectangle((meter_x + 2, meter_y + 2, meter_x + level_width, meter_y + meter_height - 2),
-                          outline=255, fill=255)
+        # Nivel actual (proteger contra valores negativos)
+        if db_level > 0:
+            level_width = int(min(db_level, 120) * meter_width / 120)
+            if level_width > 2:
+                draw.rectangle((meter_x + 2, meter_y + 2, meter_x + level_width, meter_y + meter_height - 2),
+                              outline=255, fill=255)
 
-    # Linea del umbral
-    threshold_x = meter_x + int(threshold_db * meter_width / 120)
-    draw.line((threshold_x, meter_y - 2, threshold_x, meter_y + meter_height + 2), fill=255, width=2)
+        # Linea del umbral
+        threshold_x = meter_x + int(threshold_db * meter_width / 120)
+        draw.line((threshold_x, meter_y - 2, threshold_x, meter_y + meter_height + 2), fill=255, width=2)
 
-    # Instrucciones: OK=Config, Hold=Reset
-    draw.text((x, top+54), f"D:{len(bt_devices)} OK:Config 2s:Reset", font=font_small, fill=255)
-    
-    disp.display(image)
+        # Instrucciones: OK=Config, Hold=Reset
+        draw.text((x, top+54), f"D:{len(bt_devices)} OK:Config 2s:Reset", font=font_small, fill=255)
+
+        disp.display(image)
+    except Exception as e:
+        print(f"[!] Error actualizando display: {e}")
+
+def request_display_update(db_level):
+    """Solicita actualización del display de forma asíncrona (thread-safe)"""
+    global display_db_level, display_update_needed
+    with display_lock:
+        display_db_level = db_level
+        display_update_needed = True
+
+def display_update_thread():
+    """Thread dedicado para actualizar el display sin bloquear el audio"""
+    global display_update_needed, display_db_level
+    while monitoring:
+        try:
+            update_needed = False
+            current_level = 0.0
+            with display_lock:
+                if display_update_needed:
+                    update_needed = True
+                    current_level = display_db_level
+                    display_update_needed = False
+
+            if update_needed and not config_mode:
+                draw_volume_meter(current_level)
+
+            time.sleep(0.05)  # ~20 FPS máximo para el display
+        except Exception as e:
+            print(f"[!] Error en display thread: {e}")
+            time.sleep(0.1)
 
 def check_bluetooth_adapters():
     """Verifica adaptadores Bluetooth disponibles"""
@@ -536,21 +572,28 @@ def scan_bluetooth_devices():
                                                    device_id=device_id if device_id >= 0 else None)
 
         speaker_name_pattern = re.compile(
-            r"(speaker|parlante|altavoz|soundbar|sound|audio|boom|jbl|bose|sony|anker|marshall|lg|samsung)",
+            r"(speaker|parlante|altavoz|soundbar|sound|audio|boom|jbl|bose|sony|anker|marshall|lg|samsung|harman|kardon|onyx)",
             re.IGNORECASE
         )
+        # Obtener dispositivos emparejados para usar como filtro adicional
         paired_devices = {}
-        paired_devices_result = subprocess.run(
-            ["bluetoothctl", "paired-devices"],
-            capture_output=True,
-            text=True
-        )
-        if paired_devices_result.stdout:
-            for line in paired_devices_result.stdout.splitlines():
-                if line.startswith("Device "):
-                    parts = line.split(" ", 2)
-                    if len(parts) >= 3:
-                        paired_devices[parts[1]] = parts[2].strip()
+        try:
+            paired_devices_result = subprocess.run(
+                ["bluetoothctl", "paired-devices"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            # Procesar salida aunque el returncode no sea 0 (bluetoothctl a veces falla)
+            if paired_devices_result.stdout:
+                for line in paired_devices_result.stdout.splitlines():
+                    if line.startswith("Device "):
+                        parts = line.split(" ", 2)
+                        if len(parts) >= 3:
+                            paired_devices[parts[1]] = parts[2].strip()
+                print(f"[*] Dispositivos emparejados encontrados: {len(paired_devices)}")
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            print(f"[!] No se pudo obtener dispositivos emparejados: {e}")
 
         bt_devices_by_addr = {}
         for addr, name, device_class in nearby_devices:
@@ -574,40 +617,21 @@ def scan_bluetooth_devices():
         # Transferir dispositivos encontrados a bt_devices
         bt_devices = list(bt_devices_by_addr.values())
 
+        # Agregar dispositivos emparejados que no fueron encontrados en el escaneo
         paired_added = 0
         existing_addrs = {device['addr'] for device in bt_devices}
-        try:
-            paired_result = subprocess.run(
-                ['bluetoothctl', 'paired-devices'],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            if paired_result.returncode == 0:
-                for line in paired_result.stdout.splitlines():
-                    line = line.strip()
-                    if not line.startswith("Device "):
-                        continue
-                    parts = line.split(" ", 2)
-                    if len(parts) < 2:
-                        continue
-                    addr = parts[1].strip()
-                    name = parts[2].strip() if len(parts) > 2 else "Unknown"
-                    if addr and addr not in existing_addrs:
-                        bt_devices.append({
-                            'addr': addr,
-                            'name': name if name else "Unknown",
-                            'class': None
-                        })
-                        existing_addrs.add(addr)
-                        paired_added += 1
-                        print(f"[+] Emparejado agregado: {addr} - {name}")
-            else:
-                print("[!] Error obteniendo dispositivos emparejados")
-                writeLog(f"Error en bluetoothctl paired-devices: {paired_result.stderr.strip()}")
-        except FileNotFoundError:
-            print("[!] Comando bluetoothctl no encontrado")
-            writeLog("Comando bluetoothctl no encontrado al listar emparejados")
+
+        # Usar los paired_devices ya obtenidos antes
+        for addr, name in paired_devices.items():
+            if addr not in existing_addrs:
+                bt_devices.append({
+                    'addr': addr,
+                    'name': name if name else "Unknown",
+                    'class': None
+                })
+                existing_addrs.add(addr)
+                paired_added += 1
+                print(f"[+] Emparejado agregado: {addr} - {name}")
         
         print(f"[*] Dispositivos emparejados agregados: {paired_added}")
         writeLog(f"Dispositivos emparejados agregados: {paired_added}")
@@ -713,7 +737,7 @@ def monitor_volume():
         return
 
     def audio_callback(indata, frames, time, status):
-        if status:
+        if status and status != 'input overflow':
             print(f"[!] Audio callback status: {status}")
         if config_mode:
             return
@@ -730,8 +754,8 @@ def monitor_volume():
             # Calcular promedio
             avg_db = np.mean(db_history)
 
-            # Mostrar medidor visual
-            draw_volume_meter(avg_db)
+            # Solicitar actualización del display (asíncrono, no bloquea)
+            request_display_update(avg_db)
 
             # Si supera el umbral, activar ataque
             if avg_db > threshold_db and not scanning:
@@ -886,12 +910,17 @@ def main():
     
     # Iniciar monitoreo
     monitoring = True
-    
+
     # Thread para ataque continuo
     attack_thread = threading.Thread(target=continuous_attack)
     attack_thread.daemon = True
     attack_thread.start()
-    
+
+    # Thread para actualización asíncrona del display (evita bloquear audio)
+    disp_thread = threading.Thread(target=display_update_thread)
+    disp_thread.daemon = True
+    disp_thread.start()
+
     # Thread para re-escaneo periódico
     def periodic_scan():
         while monitoring:
