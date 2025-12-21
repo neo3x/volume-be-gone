@@ -118,23 +118,64 @@ x = 0
 
 def setup_encoder():
     """Configura el encoder rotativo"""
-    # Limpiar cualquier evento anterior en estos pines (evita RuntimeError)
+    # Limpiar GPIO completamente antes de configurar (evita RuntimeError)
     try:
-        GPIO.remove_event_detect(encoder_clk)
+        GPIO.cleanup()
     except:
         pass
-    try:
-        GPIO.remove_event_detect(encoder_sw)
-    except:
-        pass
+
+    # Reconfigurar modo GPIO después del cleanup
+    GPIO.setwarnings(False)
+    GPIO.setmode(GPIO.BCM)
+
+    # Limpiar cualquier evento anterior en estos pines específicos
+    for pin in [encoder_clk, encoder_dt, encoder_sw]:
+        try:
+            GPIO.remove_event_detect(pin)
+        except:
+            pass
+
+    # Pequeña pausa para que el kernel libere los recursos
+    time.sleep(0.1)
 
     GPIO.setup(encoder_clk, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(encoder_dt, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(encoder_sw, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-    # Configurar interrupciones
-    GPIO.add_event_detect(encoder_clk, GPIO.BOTH, callback=encoder_rotation_callback, bouncetime=50)
-    GPIO.add_event_detect(encoder_sw, GPIO.FALLING, callback=encoder_button_callback, bouncetime=300)
+    # Pequeña pausa después de configurar los pines
+    time.sleep(0.1)
+
+    # Configurar interrupciones con reintentos
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            GPIO.add_event_detect(encoder_clk, GPIO.BOTH, callback=encoder_rotation_callback, bouncetime=50)
+            break
+        except RuntimeError as e:
+            if attempt < max_retries - 1:
+                print(f"[!] Reintentando configurar encoder_clk (intento {attempt + 2}/{max_retries})...")
+                time.sleep(0.5)
+                try:
+                    GPIO.remove_event_detect(encoder_clk)
+                except:
+                    pass
+            else:
+                raise RuntimeError(f"No se pudo configurar detección en encoder_clk después de {max_retries} intentos: {e}")
+
+    for attempt in range(max_retries):
+        try:
+            GPIO.add_event_detect(encoder_sw, GPIO.FALLING, callback=encoder_button_callback, bouncetime=300)
+            break
+        except RuntimeError as e:
+            if attempt < max_retries - 1:
+                print(f"[!] Reintentando configurar encoder_sw (intento {attempt + 2}/{max_retries})...")
+                time.sleep(0.5)
+                try:
+                    GPIO.remove_event_detect(encoder_sw)
+                except:
+                    pass
+            else:
+                raise RuntimeError(f"No se pudo configurar detección en encoder_sw después de {max_retries} intentos: {e}")
 
 def encoder_rotation_callback(channel):
     """Maneja la rotación del encoder"""
