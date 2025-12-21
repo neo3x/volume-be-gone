@@ -66,8 +66,9 @@ calibration_offset = 94  # Offset de calibración del micrófono
 bt_interface = "hci1"  # Cambiar a "hci0" para usar el interno
 use_external_adapter = True  # True para usar adaptador USB
 
-# Lista de dispositivos BT encontrados
+# Lista de dispositivos BT encontrados (caché acumulativa)
 bt_devices = []
+bt_devices_cache = {}  # Caché persistente por MAC address
 attack_threads = []
 scanning = False
 monitoring = False
@@ -488,11 +489,13 @@ def check_bluetooth_adapters():
         return False
 
 def save_config():
-    """Guarda la configuración actual"""
+    """Guarda la configuración actual incluyendo dispositivos conocidos"""
+    global bt_devices_cache
     config = {
         'threshold_db': threshold_db,
         'calibration_offset': calibration_offset,
-        'use_external_adapter': use_external_adapter
+        'use_external_adapter': use_external_adapter,
+        'known_devices': bt_devices_cache  # Guardar caché de dispositivos
     }
     try:
         # Crear directorio si no existe (solo si hay directorio padre)
@@ -501,13 +504,13 @@ def save_config():
             os.makedirs(config_dir, exist_ok=True)
         with open(config_path, 'w') as f:
             json.dump(config, f, indent=2)
-        writeLog(f"Configuración guardada: Umbral={threshold_db}dB, Adaptador={'Externo' if use_external_adapter else 'Interno'}")
+        writeLog(f"Configuración guardada: Umbral={threshold_db}dB, Dispositivos={len(bt_devices_cache)}")
     except Exception as e:
         print(f"[!] Error guardando configuración: {e}")
 
 def load_config():
-    """Carga la configuración guardada"""
-    global threshold_db, calibration_offset, use_external_adapter
+    """Carga la configuración guardada incluyendo dispositivos conocidos"""
+    global threshold_db, calibration_offset, use_external_adapter, bt_devices_cache, bt_devices
     try:
         if os.path.exists(config_path):
             with open(config_path, 'r') as f:
@@ -515,6 +518,11 @@ def load_config():
                 threshold_db = config.get('threshold_db', 70)
                 calibration_offset = config.get('calibration_offset', 94)
                 use_external_adapter = config.get('use_external_adapter', True)
+                # Cargar dispositivos conocidos
+                bt_devices_cache = config.get('known_devices', {})
+                if bt_devices_cache:
+                    bt_devices = list(bt_devices_cache.values())
+                    print(f"[*] Dispositivos conocidos cargados: {len(bt_devices_cache)}")
                 print(f"[*] Configuración cargada: Umbral={threshold_db}dB, Adaptador={'Externo' if use_external_adapter else 'Interno'}")
         else:
             print("[*] Config.json no encontrado, usando configuración por defecto")
@@ -539,109 +547,173 @@ def calculate_db(audio_data):
     
     return db
 
+def scan_with_hcitool_inq():
+    """Escanea usando hcitool inq (más agresivo, detecta dispositivos no-discoverable)"""
+    global bt_interface
+    devices_found = {}
+
+    try:
+        # hcitool inq devuelve: MAC  clock_offset  class
+        result = subprocess.run(
+            ['hcitool', '-i', bt_interface, 'inq', '--length=8', '--flush'],
+            capture_output=True,
+            text=True,
+            timeout=15
+        )
+
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            # Ignorar línea "Inquiring ..."
+            if not line or line.startswith('Inquiring'):
+                continue
+
+            # Parsear: AA:BB:CC:DD:EE:FF    clock offset: 0x1234    class: 0x240404
+            parts = line.split()
+            if len(parts) >= 1:
+                addr = parts[0]
+                # Validar formato MAC
+                if re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', addr):
+                    device_class = None
+                    # Buscar clase en la línea
+                    for i, part in enumerate(parts):
+                        if part == 'class:' and i + 1 < len(parts):
+                            try:
+                                device_class = int(parts[i + 1], 16)
+                            except ValueError:
+                                pass
+
+                    devices_found[addr] = {
+                        'addr': addr,
+                        'name': None,  # inq no da nombres
+                        'class': device_class
+                    }
+
+        if devices_found:
+            print(f"[*] hcitool inq encontró: {len(devices_found)} dispositivos")
+
+    except subprocess.TimeoutExpired:
+        print("[!] hcitool inq timeout")
+    except FileNotFoundError:
+        print("[!] hcitool no encontrado")
+    except Exception as e:
+        print(f"[!] Error en hcitool inq: {e}")
+
+    return devices_found
+
+def get_device_name(addr):
+    """Obtiene el nombre de un dispositivo por su MAC"""
+    global bt_interface
+    try:
+        result = subprocess.run(
+            ['hcitool', '-i', bt_interface, 'name', addr],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        name = result.stdout.strip()
+        if name and name != addr:
+            return name
+    except:
+        pass
+    return None
+
 def scan_bluetooth_devices():
-    """Escanea dispositivos Bluetooth cercanos"""
-    global bt_devices, scanning, bt_interface
+    """Escanea dispositivos Bluetooth usando múltiples métodos (acumulativo)"""
+    global bt_devices, bt_devices_cache, scanning, bt_interface
     scanning = True
-    
+
     print(f"[*] Escaneando dispositivos Bluetooth usando {bt_interface}...")
-    updateScreen("Escaneando BT...", f"Adaptador: {bt_interface}", "Buscando parlantes...")
-    
+    updateScreen("Escaneando BT...", f"Adaptador: {bt_interface}", "Metodo: INQ + Discovery")
+
+    # Patrón para detectar parlantes por nombre
+    speaker_name_pattern = re.compile(
+        r"(speaker|parlante|altavoz|soundbar|sound|audio|boom|jbl|bose|sony|anker|marshall|lg|samsung|harman|kardon|onyx)",
+        re.IGNORECASE
+    )
+
+    new_devices_found = 0
+
     try:
         # Hacer el adaptador BT descubrible
-        os.system(f"hciconfig {bt_interface} piscan")
-        
+        os.system(f"hciconfig {bt_interface} piscan 2>/dev/null")
+
         # Escaneo más agresivo para adaptador externo
         if use_external_adapter and bt_interface == "hci1":
-            # Aumentar ventana de escaneo para Clase 1
-            os.system(f"hcitool -i {bt_interface} cmd 0x03 0x001A 0x00 0x10 0x00 0x10")
-        
-        # Descubrir dispositivos
-        # Determinar device_id basado en el adaptador disponible
-        device_id = -1  # -1 = usar default
-        if bt_interface == "hci1":
-            # Verificar si hci1 existe antes de usarlo
-            result = subprocess.run(['hciconfig'], capture_output=True, text=True)
-            if 'hci1' in result.stdout:
-                device_id = 1
-        else:
-            device_id = 0
+            os.system(f"hcitool -i {bt_interface} cmd 0x03 0x001A 0x00 0x10 0x00 0x10 2>/dev/null")
 
-        nearby_devices = bluetooth.discover_devices(duration=10, lookup_names=True,
-                                                   flush_cache=True, lookup_class=True,
-                                                   device_id=device_id if device_id >= 0 else None)
+        # === MÉTODO 1: hcitool inq (más agresivo) ===
+        print("[*] Método 1: hcitool inq...")
+        inq_devices = scan_with_hcitool_inq()
 
-        speaker_name_pattern = re.compile(
-            r"(speaker|parlante|altavoz|soundbar|sound|audio|boom|jbl|bose|sony|anker|marshall|lg|samsung|harman|kardon|onyx)",
-            re.IGNORECASE
-        )
-        # Obtener dispositivos emparejados para usar como filtro adicional
-        paired_devices = {}
+        for addr, device in inq_devices.items():
+            if addr not in bt_devices_cache:
+                # Intentar obtener nombre
+                name = get_device_name(addr)
+                device['name'] = name
+
+                # Verificar si es un dispositivo de audio por clase o nombre
+                is_audio = False
+                if device['class'] and (device['class'] & 0x240000 == 0x240000):
+                    is_audio = True
+                if name and speaker_name_pattern.search(name):
+                    is_audio = True
+
+                if is_audio:
+                    bt_devices_cache[addr] = device
+                    new_devices_found += 1
+                    print(f"[+] INQ Encontrado: {addr} - {name or 'Sin nombre'}")
+
+        # === MÉTODO 2: bluetooth.discover_devices (estándar) ===
+        print("[*] Método 2: Discovery estándar...")
         try:
-            paired_devices_result = subprocess.run(
-                ["bluetoothctl", "paired-devices"],
-                capture_output=True,
-                text=True,
-                timeout=5
+            device_id = 1 if bt_interface == "hci1" else 0
+            nearby_devices = bluetooth.discover_devices(
+                duration=8,
+                lookup_names=True,
+                flush_cache=True,
+                lookup_class=True,
+                device_id=device_id
             )
-            # Procesar salida aunque el returncode no sea 0 (bluetoothctl a veces falla)
-            if paired_devices_result.stdout:
-                for line in paired_devices_result.stdout.splitlines():
-                    if line.startswith("Device "):
-                        parts = line.split(" ", 2)
-                        if len(parts) >= 3:
-                            paired_devices[parts[1]] = parts[2].strip()
-                print(f"[*] Dispositivos emparejados encontrados: {len(paired_devices)}")
-        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-            print(f"[!] No se pudo obtener dispositivos emparejados: {e}")
 
-        bt_devices_by_addr = {}
-        for addr, name, device_class in nearby_devices:
-            reasons = []
-            if device_class & 0x240000 == 0x240000:
-                reasons.append("clase")
-            if name and speaker_name_pattern.search(name):
-                reasons.append("nombre")
-            if addr in paired_devices:
-                reasons.append("paired")
+            for addr, name, device_class in nearby_devices:
+                if addr not in bt_devices_cache:
+                    # Verificar si es dispositivo de audio
+                    is_audio = False
+                    if device_class and (device_class & 0x240000 == 0x240000):
+                        is_audio = True
+                    if name and speaker_name_pattern.search(name):
+                        is_audio = True
 
-            if reasons:
-                resolved_name = name if name else paired_devices.get(addr, "Unknown")
-                bt_devices_by_addr[addr] = {
-                    'addr': addr,
-                    'name': resolved_name,
-                    'class': device_class
-                }
-                print(f"[+] Encontrado: {addr} - {name}")
+                    if is_audio:
+                        bt_devices_cache[addr] = {
+                            'addr': addr,
+                            'name': name,
+                            'class': device_class
+                        }
+                        new_devices_found += 1
+                        print(f"[+] Discovery Encontrado: {addr} - {name}")
+                elif name and not bt_devices_cache[addr].get('name'):
+                    # Actualizar nombre si no lo teníamos
+                    bt_devices_cache[addr]['name'] = name
 
-        # Transferir dispositivos encontrados a bt_devices
-        bt_devices = list(bt_devices_by_addr.values())
+        except Exception as e:
+            print(f"[!] Error en discovery estándar: {e}")
 
-        # Agregar dispositivos emparejados que no fueron encontrados en el escaneo
-        paired_added = 0
-        existing_addrs = {device['addr'] for device in bt_devices}
+        # Actualizar lista de dispositivos desde caché
+        bt_devices = list(bt_devices_cache.values())
 
-        # Usar los paired_devices ya obtenidos antes
-        for addr, name in paired_devices.items():
-            if addr not in existing_addrs:
-                bt_devices.append({
-                    'addr': addr,
-                    'name': name if name else "Unknown",
-                    'class': None
-                })
-                existing_addrs.add(addr)
-                paired_added += 1
-                print(f"[+] Emparejado agregado: {addr} - {name}")
-        
-        print(f"[*] Dispositivos emparejados agregados: {paired_added}")
-        writeLog(f"Dispositivos emparejados agregados: {paired_added}")
-        print(f"[*] Total dispositivos encontrados: {len(bt_devices)}")
-        writeLog(f"Dispositivos BT encontrados: {len(bt_devices)} usando {bt_interface}")
-        
+        # Guardar caché en config si hay nuevos dispositivos
+        if new_devices_found > 0:
+            save_config()
+
+        print(f"[*] Nuevos dispositivos encontrados: {new_devices_found}")
+        print(f"[*] Total dispositivos en caché: {len(bt_devices_cache)}")
+        writeLog(f"Escaneo: +{new_devices_found} nuevos, total={len(bt_devices_cache)}")
+
     except Exception as e:
         print(f"[!] Error escaneando: {e}")
         writeLog(f"Error en escaneo BT: {str(e)}")
-    
+
     scanning = False
     return bt_devices
 
@@ -921,10 +993,10 @@ def main():
     disp_thread.daemon = True
     disp_thread.start()
 
-    # Thread para re-escaneo periódico
+    # Thread para re-escaneo periódico (frecuente para capturar dispositivos al encenderse)
     def periodic_scan():
         while monitoring:
-            time.sleep(30)  # Re-escanear cada 30 segundos
+            time.sleep(15)  # Re-escanear cada 15 segundos para capturar dispositivos al encenderse
             if monitoring and not scanning and not config_mode:
                 scan_bluetooth_devices()
     
