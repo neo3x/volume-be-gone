@@ -568,8 +568,11 @@ def scan_bluetooth_devices():
                     'addr': addr,
                     'name': resolved_name,
                     'class': device_class
-                })
+                }
                 print(f"[+] Encontrado: {addr} - {name}")
+
+        # Transferir dispositivos encontrados a bt_devices
+        bt_devices = list(bt_devices_by_addr.values())
 
         paired_added = 0
         existing_addrs = {device['addr'] for device in bt_devices}
