@@ -222,11 +222,17 @@ def encoder_polling_thread():
                     os.system("pkill -f l2ping")
                     os.system("pkill -f rfcomm")
                     GPIO.cleanup()
-                    time.sleep(1)
-                    # Reiniciar con sudo para mantener permisos
+                    time.sleep(0.5)
+                    # Reiniciar: usar nohup para desacoplar el proceso
                     script_path = os.path.abspath(sys.argv[0])
-                    os.system(f"sudo {sys.executable} {script_path} &")
-                    sys.exit(0)
+                    # Si ya somos root, no necesitamos sudo
+                    if os.geteuid() == 0:
+                        cmd = f"nohup {sys.executable} {script_path} > /dev/null 2>&1 &"
+                    else:
+                        cmd = f"nohup sudo {sys.executable} {script_path} > /dev/null 2>&1 &"
+                    os.system(cmd)
+                    time.sleep(0.5)
+                    os._exit(0)  # Salir inmediatamente sin cleanup adicional
 
             # Pequeña pausa para no saturar CPU (2ms = respuesta rápida)
             time.sleep(0.002)
