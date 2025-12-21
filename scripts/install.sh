@@ -218,6 +218,19 @@ setcap 'cap_net_raw,cap_net_admin+eip' $(which python3) 2>/dev/null || true
 
 echo -e "${GREEN}Usuario $REAL_USER agregado a grupos: bluetooth, audio, i2c, gpio, spi, dialout${NC}"
 
+# Configurar sudoers para permitir reinicio del servicio sin contraseña
+echo -e "${YELLOW}Configurando permisos para reinicio del servicio...${NC}"
+SUDOERS_FILE="/etc/sudoers.d/volumebegone"
+cat > "$SUDOERS_FILE" << SUDOERSEOF
+# Permitir reinicio del servicio volumebegone sin contraseña
+$REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart volumebegone
+$REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start volumebegone
+$REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop volumebegone
+$REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/python3
+SUDOERSEOF
+chmod 440 "$SUDOERS_FILE"
+echo -e "${GREEN}  [+] Permisos de reinicio configurados${NC}"
+
 # Enable Bluetooth service
 systemctl enable bluetooth 2>/dev/null || true
 systemctl start bluetooth 2>/dev/null || true
