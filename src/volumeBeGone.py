@@ -327,17 +327,18 @@ def show_boot_screen(step, total_steps, message):
     draw = ImageDraw.Draw(image)
     draw.rectangle((0,0,width,height), outline=0, fill=0)
 
-    # Logo/Título
+    # Logo/Titulo
     draw.text((x, top+2), "Volume BeGone", font=font, fill=255)
-    draw.text((x+20, top+14), "v2.1", font=font_small, fill=255)
+    draw.text((x+90, top+2), "v2.1", font=font_small, fill=255)
 
-    # Mensaje de estado
-    draw.text((x, top+28), "Cargando...", font=font, fill=255)
-    draw.text((x, top+40), message[:20], font=font_small, fill=255)
+    # Mensaje de estado con porcentaje
+    percent = int((step / total_steps) * 100)
+    draw.text((x, top+18), f"Cargando... {percent}%", font=font, fill=255)
+    draw.text((x, top+32), message[:21], font=font_small, fill=255)
 
     # Barra de progreso
-    bar_y = top + 52
-    bar_height = 6
+    bar_y = top + 46
+    bar_height = 10
     bar_width = 120
     bar_x = 4
 
@@ -348,10 +349,6 @@ def show_boot_screen(step, total_steps, message):
     progress = int((step / total_steps) * bar_width)
     if progress > 2:
         draw.rectangle((bar_x + 1, bar_y + 1, bar_x + progress - 1, bar_y + bar_height - 1), outline=255, fill=255)
-
-    # Porcentaje
-    percent = int((step / total_steps) * 100)
-    draw.text((x+50, top+40), f"{percent}%", font=font_small, fill=255)
 
     disp.display(image)
 
