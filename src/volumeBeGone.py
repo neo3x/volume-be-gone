@@ -544,8 +544,45 @@ def scan_bluetooth_devices():
                     'class': device_class
                 })
                 print(f"[+] Encontrado: {addr} - {name}")
+
+        paired_added = 0
+        existing_addrs = {device['addr'] for device in bt_devices}
+        try:
+            paired_result = subprocess.run(
+                ['bluetoothctl', 'paired-devices'],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if paired_result.returncode == 0:
+                for line in paired_result.stdout.splitlines():
+                    line = line.strip()
+                    if not line.startswith("Device "):
+                        continue
+                    parts = line.split(" ", 2)
+                    if len(parts) < 2:
+                        continue
+                    addr = parts[1].strip()
+                    name = parts[2].strip() if len(parts) > 2 else "Unknown"
+                    if addr and addr not in existing_addrs:
+                        bt_devices.append({
+                            'addr': addr,
+                            'name': name if name else "Unknown",
+                            'class': None
+                        })
+                        existing_addrs.add(addr)
+                        paired_added += 1
+                        print(f"[+] Emparejado agregado: {addr} - {name}")
+            else:
+                print("[!] Error obteniendo dispositivos emparejados")
+                writeLog(f"Error en bluetoothctl paired-devices: {paired_result.stderr.strip()}")
+        except FileNotFoundError:
+            print("[!] Comando bluetoothctl no encontrado")
+            writeLog("Comando bluetoothctl no encontrado al listar emparejados")
         
-        print(f"[*] Total dispositivos de audio encontrados: {len(bt_devices)}")
+        print(f"[*] Dispositivos emparejados agregados: {paired_added}")
+        writeLog(f"Dispositivos emparejados agregados: {paired_added}")
+        print(f"[*] Total dispositivos encontrados: {len(bt_devices)}")
         writeLog(f"Dispositivos BT encontrados: {len(bt_devices)} usando {bt_interface}")
         
     except Exception as e:
