@@ -215,14 +215,18 @@ def encoder_polling_thread():
             # Verificar presión larga del botón (reset)
             if sw_state == GPIO.LOW and button_press_time > 0:
                 if time.time() - button_press_time > 2:
-                    if monitoring and not config_mode:
-                        print("[*] Reiniciando...")
-                        monitoring = False
-                        encoder_running = False
-                        os.system("pkill -f l2ping")
-                        os.system("pkill -f rfcomm")
-                        time.sleep(1)
-                        os.execv(sys.executable, [sys.executable] + sys.argv)
+                    # Reset disponible en cualquier momento (monitoreo o config)
+                    print("[*] Reiniciando sistema...")
+                    monitoring = False
+                    encoder_running = False
+                    os.system("pkill -f l2ping")
+                    os.system("pkill -f rfcomm")
+                    GPIO.cleanup()
+                    time.sleep(1)
+                    # Reiniciar con sudo para mantener permisos
+                    script_path = os.path.abspath(sys.argv[0])
+                    os.system(f"sudo {sys.executable} {script_path} &")
+                    sys.exit(0)
 
             # Pequeña pausa para no saturar CPU (2ms = respuesta rápida)
             time.sleep(0.002)
