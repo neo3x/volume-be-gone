@@ -41,6 +41,7 @@ import bluetooth
 import math
 import json
 from pathlib import Path
+import re
 
 # Configuración
 # Detectar ruta del script automáticamente
@@ -533,14 +534,39 @@ def scan_bluetooth_devices():
         nearby_devices = bluetooth.discover_devices(duration=10, lookup_names=True,
                                                    flush_cache=True, lookup_class=True,
                                                    device_id=device_id if device_id >= 0 else None)
-        
-        bt_devices = []
+
+        speaker_name_pattern = re.compile(
+            r"(speaker|parlante|altavoz|soundbar|sound|audio|boom|jbl|bose|sony|anker|marshall|lg|samsung)",
+            re.IGNORECASE
+        )
+        paired_devices = {}
+        paired_devices_result = subprocess.run(
+            ["bluetoothctl", "paired-devices"],
+            capture_output=True,
+            text=True
+        )
+        if paired_devices_result.stdout:
+            for line in paired_devices_result.stdout.splitlines():
+                if line.startswith("Device "):
+                    parts = line.split(" ", 2)
+                    if len(parts) >= 3:
+                        paired_devices[parts[1]] = parts[2].strip()
+
+        bt_devices_by_addr = {}
         for addr, name, device_class in nearby_devices:
-            # Filtrar por clase de dispositivo de audio (0x240000)
-            if device_class & 0x240000 == 0x240000:  # Audio/Video devices
-                bt_devices.append({
+            reasons = []
+            if device_class & 0x240000 == 0x240000:
+                reasons.append("clase")
+            if name and speaker_name_pattern.search(name):
+                reasons.append("nombre")
+            if addr in paired_devices:
+                reasons.append("paired")
+
+            if reasons:
+                resolved_name = name if name else paired_devices.get(addr, "Unknown")
+                bt_devices_by_addr[addr] = {
                     'addr': addr,
-                    'name': name if name else "Unknown",
+                    'name': resolved_name,
                     'class': device_class
                 })
                 print(f"[+] Encontrado: {addr} - {name}")
