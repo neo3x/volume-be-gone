@@ -118,10 +118,20 @@ x = 0
 
 def setup_encoder():
     """Configura el encoder rotativo"""
+    # Limpiar cualquier evento anterior en estos pines (evita RuntimeError)
+    try:
+        GPIO.remove_event_detect(encoder_clk)
+    except:
+        pass
+    try:
+        GPIO.remove_event_detect(encoder_sw)
+    except:
+        pass
+
     GPIO.setup(encoder_clk, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(encoder_dt, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     GPIO.setup(encoder_sw, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-    
+
     # Configurar interrupciones
     GPIO.add_event_detect(encoder_clk, GPIO.BOTH, callback=encoder_rotation_callback, bouncetime=2)
     GPIO.add_event_detect(encoder_sw, GPIO.FALLING, callback=encoder_button_callback, bouncetime=300)
