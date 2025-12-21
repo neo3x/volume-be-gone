@@ -223,16 +223,26 @@ def encoder_polling_thread():
                     os.system("pkill -f rfcomm")
                     GPIO.cleanup()
                     time.sleep(0.3)
-                    # Reiniciar usando subprocess.Popen con nuevo session
-                    script_path = os.path.abspath(sys.argv[0])
-                    subprocess.Popen(
-                        [sys.executable, script_path],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        stdin=subprocess.DEVNULL,
-                        start_new_session=True,
-                        close_fds=True
-                    )
+
+                    # Detectar si corremos como servicio systemd
+                    is_systemd_service = os.environ.get('INVOCATION_ID') is not None
+
+                    if is_systemd_service:
+                        # Reiniciar via systemctl
+                        print("[*] Reiniciando servicio systemd...")
+                        os.system("sudo systemctl restart volumebegone &")
+                    else:
+                        # Reiniciar manualmente
+                        script_path = os.path.abspath(sys.argv[0])
+                        subprocess.Popen(
+                            ["sudo", sys.executable, script_path],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            stdin=subprocess.DEVNULL,
+                            start_new_session=True,
+                            close_fds=True
+                        )
+
                     time.sleep(0.3)
                     os._exit(0)
 
