@@ -547,18 +547,22 @@ def calculate_db(audio_data):
     
     return db
 
-def scan_with_hcitool_inq():
+def scan_with_hcitool_inq(quick_mode=False):
     """Escanea usando hcitool inq (más agresivo, detecta dispositivos no-discoverable)"""
     global bt_interface
     devices_found = {}
 
+    # En modo rápido, escaneo de 3 segundos; normal 8 segundos
+    length = 3 if quick_mode else 8
+    timeout = length + 5
+
     try:
         # hcitool inq devuelve: MAC  clock_offset  class
         result = subprocess.run(
-            ['hcitool', '-i', bt_interface, 'inq', '--length=8', '--flush'],
+            ['hcitool', '-i', bt_interface, 'inq', f'--length={length}', '--flush'],
             capture_output=True,
             text=True,
-            timeout=15
+            timeout=timeout
         )
 
         for line in result.stdout.splitlines():
@@ -617,8 +621,57 @@ def get_device_name(addr):
         pass
     return None
 
+def quick_scan_bluetooth():
+    """Escaneo rápido (3 seg) para capturar dispositivos al encenderse"""
+    global bt_devices, bt_devices_cache, scanning, bt_interface
+
+    if scanning:
+        return bt_devices
+
+    scanning = True
+
+    # Patrón para detectar parlantes por nombre
+    speaker_name_pattern = re.compile(
+        r"(speaker|parlante|altavoz|soundbar|sound|audio|boom|jbl|bose|sony|anker|marshall|lg|samsung|harman|kardon|onyx)",
+        re.IGNORECASE
+    )
+
+    try:
+        # Solo hcitool inq en modo rápido (3 segundos)
+        inq_devices = scan_with_hcitool_inq(quick_mode=True)
+
+        new_found = 0
+        for addr, device in inq_devices.items():
+            if addr not in bt_devices_cache:
+                # Intentar obtener nombre rápidamente
+                name = get_device_name(addr)
+                device['name'] = name
+
+                # Verificar si es audio
+                is_audio = False
+                if device['class'] and (device['class'] & 0x240000 == 0x240000):
+                    is_audio = True
+                if name and speaker_name_pattern.search(name):
+                    is_audio = True
+
+                if is_audio:
+                    bt_devices_cache[addr] = device
+                    new_found += 1
+                    print(f"[+] QUICK: {addr} - {name or 'Sin nombre'}")
+
+        if new_found > 0:
+            bt_devices = list(bt_devices_cache.values())
+            save_config()
+            print(f"[*] Quick scan: +{new_found} nuevos, total={len(bt_devices_cache)}")
+
+    except Exception as e:
+        pass  # Silencioso en modo rápido
+
+    scanning = False
+    return bt_devices
+
 def scan_bluetooth_devices():
-    """Escanea dispositivos Bluetooth usando múltiples métodos (acumulativo)"""
+    """Escanea dispositivos Bluetooth usando múltiples métodos (acumulativo) - escaneo completo"""
     global bt_devices, bt_devices_cache, scanning, bt_interface
     scanning = True
 
@@ -993,14 +1046,14 @@ def main():
     disp_thread.daemon = True
     disp_thread.start()
 
-    # Thread para re-escaneo periódico (frecuente para capturar dispositivos al encenderse)
-    def periodic_scan():
+    # Thread para re-escaneo rápido (captura dispositivos al encenderse)
+    def periodic_quick_scan():
         while monitoring:
-            time.sleep(15)  # Re-escanear cada 15 segundos para capturar dispositivos al encenderse
+            time.sleep(5)  # Escaneo rápido cada 5 segundos
             if monitoring and not scanning and not config_mode:
-                scan_bluetooth_devices()
+                quick_scan_bluetooth()  # Escaneo rápido de 3 seg
     
-    scan_thread = threading.Thread(target=periodic_scan)
+    scan_thread = threading.Thread(target=periodic_quick_scan)
     scan_thread.daemon = True
     scan_thread.start()
     
