@@ -222,17 +222,19 @@ def encoder_polling_thread():
                     os.system("pkill -f l2ping")
                     os.system("pkill -f rfcomm")
                     GPIO.cleanup()
-                    time.sleep(0.5)
-                    # Reiniciar: usar nohup para desacoplar el proceso
+                    time.sleep(0.3)
+                    # Reiniciar usando subprocess.Popen con nuevo session
                     script_path = os.path.abspath(sys.argv[0])
-                    # Si ya somos root, no necesitamos sudo
-                    if os.geteuid() == 0:
-                        cmd = f"nohup {sys.executable} {script_path} > /dev/null 2>&1 &"
-                    else:
-                        cmd = f"nohup sudo {sys.executable} {script_path} > /dev/null 2>&1 &"
-                    os.system(cmd)
-                    time.sleep(0.5)
-                    os._exit(0)  # Salir inmediatamente sin cleanup adicional
+                    subprocess.Popen(
+                        [sys.executable, script_path],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        stdin=subprocess.DEVNULL,
+                        start_new_session=True,
+                        close_fds=True
+                    )
+                    time.sleep(0.3)
+                    os._exit(0)
 
             # Pequeña pausa para no saturar CPU (2ms = respuesta rápida)
             time.sleep(0.002)
@@ -240,70 +242,6 @@ def encoder_polling_thread():
         except Exception as e:
             print(f"[!] Error en encoder polling: {e}")
             time.sleep(0.1)
-
-def encoder_rotation_callback(channel):
-    """Maneja la rotación del encoder"""
-    global threshold_db, encoder_last_clk, last_encoder_time, config_mode
-    
-    if not config_mode:
-        return
-    
-    try:
-        clk_state = GPIO.input(encoder_clk)
-        dt_state = GPIO.input(encoder_dt)
-        
-        current_time = time.time()
-        time_diff = current_time - last_encoder_time
-        
-        if clk_state != encoder_last_clk and clk_state == GPIO.LOW:
-            # Determinar velocidad de rotación
-            if time_diff < fast_rotation_threshold:
-                step = 5  # Giro rápido: incrementos de 5dB
-            else:
-                step = 1  # Giro lento: incrementos de 1dB
-            
-            if dt_state != clk_state:
-                # Giro horario - aumentar
-                if threshold_db < max_threshold_db:
-                    threshold_db = min(threshold_db + step, max_threshold_db)
-                    update_config_screen()
-            else:
-                # Giro antihorario - disminuir
-                if threshold_db > min_threshold_db:
-                    threshold_db = max(threshold_db - step, min_threshold_db)
-                    update_config_screen()
-            
-            last_encoder_time = current_time
-        
-        encoder_last_clk = clk_state
-        
-    except Exception as e:
-        print(f"[!] Error en encoder: {e}")
-
-def encoder_button_callback(channel):
-    """Maneja el botón del encoder"""
-    global config_mode, monitoring
-    
-    time.sleep(0.05)  # Anti-rebote adicional
-    
-    if GPIO.input(encoder_sw) == GPIO.LOW:
-        if config_mode:
-            # En modo config: confirmar y comenzar
-            config_mode = False
-            save_config()
-            print(f"[*] Configuración confirmada: {threshold_db} dB")
-        elif monitoring:
-            # Durante monitoreo: verificar si es presión larga para reset
-            start_time = time.time()
-            while GPIO.input(encoder_sw) == GPIO.LOW:
-                if time.time() - start_time > 2:  # 2 segundos
-                    print("[*] Reiniciando...")
-                    monitoring = False
-                    os.system("pkill -f l2ping")
-                    os.system("pkill -f rfcomm")
-                    time.sleep(1)
-                    os.execv(sys.executable, [sys.executable] + sys.argv)
-                time.sleep(0.1)
 
 def update_config_screen():
     """Actualiza la pantalla en modo configuracion con barra visual"""
