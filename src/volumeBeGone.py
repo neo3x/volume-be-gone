@@ -196,11 +196,17 @@ def encoder_polling_thread():
                     if button_press_time > 0:
                         press_duration = time.time() - button_press_time
                         if press_duration < 2:
-                            # Presión corta: confirmar configuración
+                            # Presión corta
                             if config_mode:
+                                # En config: confirmar y comenzar monitoreo
                                 config_mode = False
                                 save_config()
-                                print(f"[*] Configuración confirmada: {threshold_db} dB")
+                                print(f"[*] Configuracion confirmada: {threshold_db} dB")
+                            elif monitoring:
+                                # En monitoreo: volver a modo configuracion
+                                config_mode = True
+                                print(f"[*] Volviendo a modo configuracion")
+                                update_config_screen()
                         # Presión larga se maneja abajo
                         button_press_time = 0
 
@@ -209,7 +215,7 @@ def encoder_polling_thread():
             # Verificar presión larga del botón (reset)
             if sw_state == GPIO.LOW and button_press_time > 0:
                 if time.time() - button_press_time > 2:
-                    if monitoring:
+                    if monitoring and not config_mode:
                         print("[*] Reiniciando...")
                         monitoring = False
                         encoder_running = False
@@ -413,36 +419,37 @@ def draw_volume_meter(db_level):
     image = Image.new('1', (width, height))
     draw = ImageDraw.Draw(image)
     draw.rectangle((0,0,width,height), outline=0, fill=0)
-    
-    # Título
-    draw.text((x, top+2), "Volume BeGone", font=font, fill=255)
-    
-    # Nivel actual
+
+    # Titulo con estado
+    status = "ACTIVO!" if db_level > threshold_db else ""
+    draw.text((x, top+2), f"VBG {status}", font=font, fill=255)
+
+    # Nivel actual y umbral
     draw.text((x, top+14), f"Nivel: {db_level:.1f} dB", font=font, fill=255)
     draw.text((x, top+26), f"Umbral: {threshold_db} dB", font=font, fill=255)
-    
+
     # Medidor visual
     meter_y = top + 40
     meter_height = 10
     meter_width = 120
     meter_x = 4
-    
+
     # Marco del medidor
     draw.rectangle((meter_x, meter_y, meter_x + meter_width, meter_y + meter_height), outline=255, fill=0)
-    
-    # Nivel actual
+
+    # Nivel actual (proteger contra valores negativos)
     if db_level > 0:
         level_width = int(min(db_level, 120) * meter_width / 120)
-        draw.rectangle((meter_x + 2, meter_y + 2, meter_x + level_width, meter_y + meter_height - 2), 
-                      outline=255, fill=255)
-    
-    # Línea del umbral
+        if level_width > 2:
+            draw.rectangle((meter_x + 2, meter_y + 2, meter_x + level_width, meter_y + meter_height - 2),
+                          outline=255, fill=255)
+
+    # Linea del umbral
     threshold_x = meter_x + int(threshold_db * meter_width / 120)
     draw.line((threshold_x, meter_y - 2, threshold_x, meter_y + meter_height + 2), fill=255, width=2)
-    
-    # Estado
-    status = "ACTIVO!" if db_level > threshold_db else "Monitoreando"
-    draw.text((x, top+54), f"Disp:{len(bt_devices)} {status}", font=font_small, fill=255)
+
+    # Instrucciones: OK=Config, Hold=Reset
+    draw.text((x, top+54), f"D:{len(bt_devices)} OK:Config 2s:Reset", font=font_small, fill=255)
     
     disp.display(image)
 
