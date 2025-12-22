@@ -238,13 +238,14 @@ def is_audio_device(device):
     Returns:
         bool: True si el dispositivo es identificado como dispositivo de audio
     """
-    # Verificar nombre del dispositivo
-    device_name = device.get('name', '').lower()
+    # Verificar nombre del dispositivo (manejar None)
+    device_name = (device.get('name') or '').lower()
 
     # Si el nombre contiene alguna keyword de audio
-    for keyword in AUDIO_DEVICE_KEYWORDS:
-        if keyword.lower() in device_name:
-            return True
+    if device_name:  # Solo buscar si hay nombre
+        for keyword in AUDIO_DEVICE_KEYWORDS:
+            if keyword.lower() in device_name:
+                return True
 
     # Verificar clase del dispositivo (solo Classic Bluetooth)
     device_class = device.get('class', None)
