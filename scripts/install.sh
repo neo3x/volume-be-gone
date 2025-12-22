@@ -64,11 +64,32 @@ echo -e "${YELLOW}[3/8] Installing system dependencies...${NC}"
 apt-get install -y \
     python3-pip python3-dev python3-numpy python3-scipy \
     bluetooth bluez libbluetooth-dev \
+    bluez-tools \
+    bluez-hcidump \
     i2c-tools \
     git python3-venv \
     python3-pillow \
     python3-psutil \
     libportaudio2
+
+# Verificar herramientas Bluetooth instaladas
+echo -e "${YELLOW}Verificando herramientas Bluetooth...${NC}"
+MISSING_TOOLS=""
+
+for tool in hcitool l2ping rfcomm sdptool hcidump hciconfig; do
+    if command -v "$tool" &> /dev/null; then
+        echo -e "${GREEN}  [OK] $tool instalado${NC}"
+    else
+        echo -e "${RED}  [!] $tool NO encontrado${NC}"
+        MISSING_TOOLS="$MISSING_TOOLS $tool"
+    fi
+done
+
+if [ -n "$MISSING_TOOLS" ]; then
+    echo -e "${YELLOW}  [!] Herramientas faltantes:$MISSING_TOOLS${NC}"
+    echo -e "${YELLOW}  [*] Intentando instalar paquetes adicionales...${NC}"
+    apt-get install -y bluez bluez-tools bluez-hcidump 2>/dev/null || true
+fi
 
 # PortAudio dev para compilar
 apt-get install -y portaudio19-dev 2>/dev/null || apt-get install -y libportaudio-dev 2>/dev/null || true
@@ -216,6 +237,51 @@ echo -e "${YELLOW}[7/8] Configuring permissions...${NC}"
 usermod -a -G bluetooth,audio,i2c,gpio,spi,dialout "$REAL_USER" 2>/dev/null || true
 setcap 'cap_net_raw,cap_net_admin+eip' $(which python3) 2>/dev/null || true
 
+# Configurar permisos para herramientas Bluetooth (requieren CAP_NET_RAW y CAP_NET_ADMIN)
+echo -e "${YELLOW}Configurando permisos para herramientas Bluetooth...${NC}"
+
+# hcitool (para scanning BLE y Classic)
+if [ -f /usr/bin/hcitool ]; then
+    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/hcitool
+    echo -e "${GREEN}  [+] hcitool configurado${NC}"
+fi
+
+# l2ping (para ataques L2CAP)
+if [ -f /usr/bin/l2ping ]; then
+    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/l2ping
+    echo -e "${GREEN}  [+] l2ping configurado${NC}"
+fi
+
+# rfcomm (para ataques RFCOMM)
+if [ -f /usr/bin/rfcomm ]; then
+    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/rfcomm
+    echo -e "${GREEN}  [+] rfcomm configurado${NC}"
+fi
+
+# hcidump (para captura de tráfico)
+if [ -f /usr/bin/hcidump ]; then
+    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/hcidump
+    echo -e "${GREEN}  [+] hcidump configurado${NC}"
+fi
+
+# sdptool (para enumeración de servicios)
+if [ -f /usr/bin/sdptool ]; then
+    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/sdptool
+    echo -e "${GREEN}  [+] sdptool configurado${NC}"
+fi
+
+# hciconfig (para configuración de adaptadores)
+if [ -f /usr/bin/hciconfig ]; then
+    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/hciconfig
+    echo -e "${GREEN}  [+] hciconfig configurado${NC}"
+fi
+
+# bccmd (para adaptadores CSR - opcional)
+if [ -f /usr/bin/bccmd ]; then
+    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/bccmd
+    echo -e "${GREEN}  [+] bccmd configurado (adaptadores CSR)${NC}"
+fi
+
 echo -e "${GREEN}Usuario $REAL_USER agregado a grupos: bluetooth, audio, i2c, gpio, spi, dialout${NC}"
 
 # Configurar sudoers para permitir reinicio del servicio sin contraseña
@@ -256,6 +322,8 @@ ExecStartPre=/bin/sleep 15
 ExecStart=/usr/bin/python3 $INSTALL_DIR/src/volumeBeGone.py
 ExecStopPost=-/usr/bin/pkill -f l2ping
 ExecStopPost=-/usr/bin/pkill -f rfcomm
+ExecStopPost=-/usr/bin/pkill -f hcidump
+ExecStopPost=-/usr/bin/pkill -f hcitool
 Restart=on-failure
 RestartSec=30
 StandardOutput=journal
