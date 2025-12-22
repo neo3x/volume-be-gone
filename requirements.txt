@@ -1,13 +1,18 @@
 # Volume Be Gone - Python Dependencies
 # Install with: pip3 install -r requirements.txt
+#
+# IMPORTANTE: Las herramientas Bluetooth (hcitool, l2ping, rfcomm, sdptool, hcidump)
+# se instalan vía APT, NO pip. Ver scripts/install.sh para instalación completa.
 
 # Audio processing
 sounddevice>=0.4.6
 numpy>=1.24.3
 scipy>=1.10.1
 
-# Bluetooth
+# Bluetooth (PyBluez para Python)
 pybluez>=0.23
+# Nota: Las herramientas del sistema (bluez, bluez-tools, bluez-hcidump)
+# se instalan con: sudo apt-get install bluez bluez-tools bluez-hcidump
 
 # GPIO and Hardware
 RPi.GPIO>=0.7.1
@@ -18,5 +23,21 @@ Pillow>=10.0.0
 
 # System
 psutil>=5.9.5
-# Note: python-apt is installed via apt, not pip
-# Install with: sudo apt-get install python3-apt
+
+# =============================================================================
+# HERRAMIENTAS BLUETOOTH REQUERIDAS (instalar vía APT)
+# =============================================================================
+# sudo apt-get install bluez bluez-tools bluez-hcidump
+#
+# Herramientas incluidas:
+#   - hcitool     : Scanning Bluetooth Classic + BLE (REQUERIDO)
+#   - l2ping      : Ataques L2CAP ping (REQUERIDO)
+#   - rfcomm      : Ataques RFCOMM (REQUERIDO)
+#   - sdptool     : Enumeración servicios SDP (REQUERIDO)
+#   - hcidump     : Captura de tráfico Bluetooth (OPCIONAL)
+#   - hciconfig   : Configuración de adaptadores (REQUERIDO)
+#   - bccmd       : Configuración CSR adapters (OPCIONAL)
+#
+# Verificar instalación:
+#   bash scripts/verify_installation.sh
+# =============================================================================
