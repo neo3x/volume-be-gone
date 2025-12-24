@@ -4,13 +4,21 @@ Control automatico de parlantes Bluetooth por nivel de volumen usando Raspberry 
 
 **Author:** Francisco Ortiz Rojas - Ingeniero Electronico
 **Contact:** francisco.ortiz@marfinex.com
-**Version:** 2.1 | **Date:** Diciembre 2025
+**Version:** 3.0 | **Date:** Diciembre 2025
 
 ---
 
 ## Descripcion
 
-Volume Be Gone es un dispositivo basado en Raspberry Pi que monitorea el nivel de ruido ambiental y automaticamente intenta desconectar parlantes Bluetooth cercanos cuando el volumen supera un umbral configurable (70-120 dB).
+Volume Be Gone es un sistema híbrido (Raspberry Pi + ESP32) que monitorea el nivel de ruido ambiental y automaticamente intenta desconectar parlantes Bluetooth cercanos cuando el volumen supera un umbral configurable (70-120 dB).
+
+### 🆕 Novedades v3.0 - Arquitectura Híbrida
+
+La versión 3.0 integra un **ESP32 BlueJammer** para ataques RF de capa física, combinando:
+- **Raspberry Pi**: Cerebro del sistema (monitoreo, UI, ataques L2CAP/RFCOMM)
+- **ESP32 + 2x nRF24L01**: Motor de RF Jamming (interferencia 2.4GHz)
+
+Ver [PROPUESTA_HIBRIDA_COMPLETA.md](PROPUESTA_HIBRIDA_COMPLETA.md) para detalles.
 
 ### ✨ Caracteristicas principales:
 
@@ -20,6 +28,8 @@ Volume Be Gone es un dispositivo basado en Raspberry Pi que monitorea el nivel d
 - 🔄 **Busqueda automatica** de dispositivos cada 30 segundos
 - 💾 **Configuracion persistente** en JSON
 - 🚀 **Inicio automatico** con systemd
+- ⚡ **NEW: RF Jamming** con ESP32 + dual nRF24L01 (v3.0)
+- 🎯 **NEW: Ataque multicapa** PHY + L2CAP + RFCOMM (v3.0)
 
 ## ⚠️ Disclaimer
 
@@ -27,7 +37,7 @@ Volume Be Gone es un dispositivo basado en Raspberry Pi que monitorea el nivel d
 
 ## 🛠️ Hardware Necesario
 
-### Componentes principales:
+### Componentes Raspberry Pi (Base):
 
 - Raspberry Pi 3B+ o 4B (2GB+)
 - Pantalla OLED 128x64 I2C SSD1306
@@ -36,9 +46,19 @@ Volume Be Gone es un dispositivo basado en Raspberry Pi que monitorea el nivel d
 - Adaptador BT Clase 1 USB (opcional)
 - Fuente 5V 3A USB-C
 
+### Componentes ESP32 BlueJammer (v3.0):
+
+- ESP32 DevKit V1 (38 pines)
+- 2x nRF24L01+PA+LNA con antena
+- 2x Capacitor 100µF/16V
+- 2x Capacitor 100nF
+- Cable USB para conexión a RPi
+
 ### 🔌 Diagrama de conexiones:
 
-Ver diagrama completo en hardware/README.md
+- RPi: Ver `hardware/README.md`
+- ESP32: Ver `hardware/ESP32_WIRING.md`
+- Arquitectura completa: Ver `PROPUESTA_HIBRIDA_COMPLETA.md`
 
 ## 💻 Instalacion
 
@@ -134,5 +154,24 @@ Este proyecto esta bajo la Licencia MIT - ver LICENSE para detalles.
 - Comunidad Raspberry Pi
 - Libreria luma.oled para displays OLED (compatible con Debian Trixie)
 
+## 📂 Estructura del Proyecto v3.0
+
+```
+volume-be-gone/
+├── src/
+│   ├── volumeBeGone.py          # Script principal RPi
+│   └── esp32_controller.py      # Controlador serial ESP32
+├── firmware/
+│   └── esp32_hybrid/
+│       └── esp32_hybrid.ino     # Firmware ESP32
+├── hardware/
+│   ├── ESP32_WIRING.md          # Conexionado ESP32
+│   ├── NRF24L01_WIRING.md       # Conexionado nRF24
+│   └── GPIO_COMPATIBILITY_ANALYSIS.md
+├── PROPUESTA_HIBRIDA_COMPLETA.md  # Documentación completa v3.0
+├── ARQUITECTURA_HIBRIDA.md        # Diagramas de arquitectura
+└── COMPARACION_JAMMERS_ESP32.md   # Análisis de repos ESP32
+```
+
 ---
-*Volume Be Gone v2.1 - Diciembre 2025*
+*Volume Be Gone v3.0 - Diciembre 2025*
