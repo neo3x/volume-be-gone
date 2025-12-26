@@ -1,24 +1,39 @@
 #!/bin/bash
 #
-# Volume Be Gone - Automated Installer
+# Volume Be Gone v3.0 - Automated Installer
+#
+# Sistema híbrido: Raspberry Pi + ESP32 BlueJammer
+# Incluye servidor web con Access Point para control desde celular.
+#
 # Run with: sudo bash install.sh
 #
+# Author: Francisco Ortiz Rojas
+# Version: 3.0
+#
+
+set -e
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-echo -e "${GREEN}=====================================${NC}"
-echo -e "${GREEN}Volume Be Gone - Installer${NC}"
-echo -e "${GREEN}=====================================${NC}"
+VERSION="3.0"
+
+echo -e "${BLUE}"
+echo "╔════════════════════════════════════════════════╗"
+echo "║      Volume Be Gone v$VERSION - Installer         ║"
+echo "║        Hybrid Architecture (RPi + ESP32)       ║"
+echo "╚════════════════════════════════════════════════╝"
+echo -e "${NC}"
 echo
 
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
-   echo -e "${RED}This script must be run as root${NC}"
-   echo "Please run: sudo bash install.sh"
+   echo -e "${RED}Este script debe ejecutarse como root${NC}"
+   echo "Uso: sudo bash install.sh"
    exit 1
 fi
 
@@ -29,14 +44,13 @@ else
     REAL_USER=$(logname 2>/dev/null || echo "")
     if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
         echo -e "${RED}Error: No se puede detectar el usuario${NC}"
-        echo "Por favor ejecuta: sudo -u tu_usuario bash install.sh"
         read -p "Ingresa tu nombre de usuario: " REAL_USER
     fi
 fi
 
 REAL_HOME=$(eval echo ~$REAL_USER)
 
-# Detectar directorio del proyecto (donde está el script)
+# Detectar directorio del proyecto
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_DIR="$SCRIPT_DIR"
 
@@ -45,20 +59,20 @@ echo -e "${YELLOW}Directorio del proyecto: $INSTALL_DIR${NC}"
 echo
 
 # Detectar distribución
-echo -e "${YELLOW}[1/8] Detectando sistema...${NC}"
+echo -e "${BLUE}[1/10] Detectando sistema...${NC}"
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     DISTRO=$ID
-    VERSION=$VERSION_CODENAME
-    echo -e "${GREEN}Detectado: $DISTRO $VERSION${NC}"
+    VERSION_NAME=$VERSION_CODENAME
+    echo -e "${GREEN}Detectado: $DISTRO $VERSION_NAME${NC}"
 fi
 
 # Update system
-echo -e "${YELLOW}[2/8] Updating system packages...${NC}"
+echo -e "${BLUE}[2/10] Actualizando sistema...${NC}"
 apt-get update
 
 # Install system dependencies
-echo -e "${YELLOW}[3/8] Installing system dependencies...${NC}"
+echo -e "${BLUE}[3/10] Instalando dependencias del sistema...${NC}"
 
 # Paquetes base
 apt-get install -y \
@@ -71,6 +85,13 @@ apt-get install -y \
     python3-pillow \
     python3-psutil \
     libportaudio2
+
+# Paquetes adicionales para v3.0 (Web Server + AP)
+echo -e "${YELLOW}Instalando dependencias web y Access Point...${NC}"
+apt-get install -y \
+    hostapd \
+    dnsmasq \
+    iptables
 
 # Verificar herramientas Bluetooth instaladas
 echo -e "${YELLOW}Verificando herramientas Bluetooth...${NC}"
@@ -87,7 +108,6 @@ done
 
 if [ -n "$MISSING_TOOLS" ]; then
     echo -e "${YELLOW}  [!] Herramientas faltantes:$MISSING_TOOLS${NC}"
-    echo -e "${YELLOW}  [*] Intentando instalar paquetes adicionales...${NC}"
     apt-get install -y bluez bluez-tools bluez-hcidump 2>/dev/null || true
 fi
 
@@ -100,14 +120,14 @@ apt-get install -y python3-smbus 2>/dev/null || apt-get install -y python3-smbus
 # BLAS/ATLAS
 apt-get install -y libopenblas-dev 2>/dev/null || apt-get install -y libatlas-base-dev 2>/dev/null || true
 
-# GPIO - en Trixie puede ser lgpio o gpiod
+# GPIO
 apt-get install -y python3-rpi.gpio 2>/dev/null || apt-get install -y python3-lgpio python3-gpiod 2>/dev/null || true
 
-# Bluetooth Python desde repos (NO pip)
+# Bluetooth Python desde repos
 apt-get install -y python3-bluez 2>/dev/null || true
 
 # Enable interfaces
-echo -e "${YELLOW}[4/8] Enabling I2C, SPI and GPIO interfaces...${NC}"
+echo -e "${BLUE}[4/10] Habilitando I2C, SPI y GPIO...${NC}"
 
 # Detectar archivo de configuración de boot
 if [ -f /boot/firmware/config.txt ]; then
@@ -137,7 +157,7 @@ if [ -n "$BOOT_CONFIG" ]; then
         echo -e "${GREEN}  [OK] SPI ya estaba habilitado${NC}"
     fi
 
-    # Habilitar I2C baudrate más alto (opcional, para pantalla OLED)
+    # Habilitar I2C baudrate más alto
     if ! grep -q "^dtparam=i2c_arm_baudrate" "$BOOT_CONFIG"; then
         echo "dtparam=i2c_arm_baudrate=400000" >> "$BOOT_CONFIG"
         echo -e "${GREEN}  [+] I2C baudrate 400kHz configurado${NC}"
@@ -146,45 +166,29 @@ else
     echo -e "${YELLOW}Archivo de configuración de boot no encontrado${NC}"
 fi
 
-# Configurar módulos del kernel para que carguen al inicio
+# Configurar módulos del kernel
 echo -e "${YELLOW}Configurando módulos del kernel...${NC}"
 
-# I2C
-if ! grep -q "^i2c-dev" /etc/modules; then
-    echo "i2c-dev" >> /etc/modules
-    echo -e "${GREEN}  [+] Módulo i2c-dev agregado${NC}"
-fi
+for module in i2c-dev i2c-bcm2835 spi-bcm2835; do
+    if ! grep -q "^$module" /etc/modules; then
+        echo "$module" >> /etc/modules
+        echo -e "${GREEN}  [+] Módulo $module agregado${NC}"
+    fi
+done
 
-if ! grep -q "^i2c-bcm2835" /etc/modules; then
-    echo "i2c-bcm2835" >> /etc/modules
-    echo -e "${GREEN}  [+] Módulo i2c-bcm2835 agregado${NC}"
-fi
-
-# SPI
-if ! grep -q "^spi-bcm2835" /etc/modules; then
-    echo "spi-bcm2835" >> /etc/modules
-    echo -e "${GREEN}  [+] Módulo spi-bcm2835 agregado${NC}"
-fi
-
-# GPIO (para el encoder)
-if ! grep -q "^gpio-bcm2835" /etc/modules 2>/dev/null; then
-    echo "gpio-bcm2835" >> /etc/modules 2>/dev/null || true
-fi
-
-# Cargar módulos ahora (sin reiniciar)
-echo -e "${YELLOW}Cargando módulos...${NC}"
+# Cargar módulos ahora
 modprobe i2c-dev 2>/dev/null || true
 modprobe i2c-bcm2835 2>/dev/null || true
 modprobe spi-bcm2835 2>/dev/null || true
 
-# Verificar que I2C está funcionando
+# Verificar I2C
 if [ -e /dev/i2c-1 ]; then
     echo -e "${GREEN}  [OK] /dev/i2c-1 disponible${NC}"
 else
     echo -e "${YELLOW}  [!] /dev/i2c-1 no disponible - reinicio requerido${NC}"
 fi
 
-# Configurar permisos de dispositivos GPIO y I2C
+# Configurar reglas udev
 echo -e "${YELLOW}Configurando reglas udev para GPIO e I2C...${NC}"
 cat > /etc/udev/rules.d/99-gpio-i2c.rules << 'UDEVEOF'
 # Reglas para GPIO
@@ -196,118 +200,140 @@ SUBSYSTEM=="i2c-dev", MODE="0660", GROUP="i2c"
 
 # Reglas para SPI
 SUBSYSTEM=="spidev", MODE="0660", GROUP="spi"
+
+# Reglas para serial (ESP32)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", MODE="0660", GROUP="dialout"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", MODE="0660", GROUP="dialout"
 UDEVEOF
 
 # Crear grupos si no existen
-getent group gpio || groupadd gpio
-getent group i2c || groupadd i2c
-getent group spi || groupadd spi
+for group in gpio i2c spi dialout; do
+    getent group $group || groupadd $group
+done
 
-# Recargar reglas udev
 udevadm control --reload-rules 2>/dev/null || true
 udevadm trigger 2>/dev/null || true
 
 # Install Python dependencies
-echo -e "${YELLOW}[5/8] Installing Python dependencies...${NC}"
+echo -e "${BLUE}[5/10] Instalando dependencias Python...${NC}"
 
-# Instalar dependencias pip (no están en repos de Trixie)
+# Detectar PEP 668
 PIP_ARGS=""
 if [ -f /usr/lib/python3*/EXTERNALLY-MANAGED ] || [ -f /usr/lib/python3.*/EXTERNALLY-MANAGED ]; then
     echo -e "${YELLOW}Detectado PEP 668, usando --break-system-packages${NC}"
     PIP_ARGS="--break-system-packages"
 fi
 
-# sounddevice (no está en repos de Trixie)
+# Dependencias básicas
 pip3 install $PIP_ARGS sounddevice || true
-
-# luma.oled para display SSD1306 (reemplaza Adafruit-SSD1306, compatible con Trixie)
 pip3 install $PIP_ARGS luma.oled || true
 
-# Setup project directory
-echo -e "${YELLOW}[6/8] Setting up project directory...${NC}"
+# Dependencias para v3.0 (Web Server)
+echo -e "${YELLOW}Instalando Flask y SocketIO...${NC}"
+pip3 install $PIP_ARGS flask flask-socketio eventlet || true
+pip3 install $PIP_ARGS pyserial || true
 
-# Create default config if needed
-if [ ! -f "$INSTALL_DIR/config.json" ]; then
-    echo '{"threshold_db": 70, "calibration_offset": 94, "use_external_adapter": true}' > "$INSTALL_DIR/config.json"
+# Setup project directory
+echo -e "${BLUE}[6/10] Configurando directorio del proyecto...${NC}"
+
+# Crear estructura de directorios
+mkdir -p "$INSTALL_DIR/config"
+mkdir -p "$INSTALL_DIR/logs"
+mkdir -p "$INSTALL_DIR/src/static/css"
+mkdir -p "$INSTALL_DIR/src/static/js"
+mkdir -p "$INSTALL_DIR/src/modules"
+
+# Crear configuración por defecto si no existe
+if [ ! -f "$INSTALL_DIR/config/settings.json" ]; then
+    cat > "$INSTALL_DIR/config/settings.json" << 'CONFIGEOF'
+{
+    "audio": {
+        "threshold": 73,
+        "calibration_offset": 94,
+        "sample_rate": 44100,
+        "channels": 1,
+        "duration": 0.1
+    },
+    "bluetooth": {
+        "scan_duration": 10,
+        "auto_scan_interval": 30,
+        "use_external_adapter": true
+    },
+    "display": {
+        "enabled": true,
+        "i2c_address": "0x3C",
+        "contrast": 255
+    },
+    "encoder": {
+        "enabled": true,
+        "clk_pin": 17,
+        "dt_pin": 18,
+        "sw_pin": 27
+    },
+    "attack": {
+        "auto_attack": false,
+        "l2cap_threads": 4,
+        "rfcomm_threads": 2,
+        "attack_duration": 30
+    },
+    "esp32": {
+        "enabled": true,
+        "port": "/dev/ttyUSB0",
+        "baudrate": 115200
+    },
+    "web": {
+        "host": "0.0.0.0",
+        "port": 5000,
+        "debug": false
+    }
+}
+CONFIGEOF
 fi
+
 chown -R "$REAL_USER:$REAL_USER" "$INSTALL_DIR"
 
 # Configure permissions
-echo -e "${YELLOW}[7/8] Configuring permissions...${NC}"
+echo -e "${BLUE}[7/10] Configurando permisos...${NC}"
 usermod -a -G bluetooth,audio,i2c,gpio,spi,dialout "$REAL_USER" 2>/dev/null || true
 setcap 'cap_net_raw,cap_net_admin+eip' $(which python3) 2>/dev/null || true
 
-# Configurar permisos para herramientas Bluetooth (requieren CAP_NET_RAW y CAP_NET_ADMIN)
+# Permisos para herramientas Bluetooth
 echo -e "${YELLOW}Configurando permisos para herramientas Bluetooth...${NC}"
-
-# hcitool (para scanning BLE y Classic)
-if [ -f /usr/bin/hcitool ]; then
-    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/hcitool
-    echo -e "${GREEN}  [+] hcitool configurado${NC}"
-fi
-
-# l2ping (para ataques L2CAP)
-if [ -f /usr/bin/l2ping ]; then
-    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/l2ping
-    echo -e "${GREEN}  [+] l2ping configurado${NC}"
-fi
-
-# rfcomm (para ataques RFCOMM)
-if [ -f /usr/bin/rfcomm ]; then
-    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/rfcomm
-    echo -e "${GREEN}  [+] rfcomm configurado${NC}"
-fi
-
-# hcidump (para captura de tráfico)
-if [ -f /usr/bin/hcidump ]; then
-    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/hcidump
-    echo -e "${GREEN}  [+] hcidump configurado${NC}"
-fi
-
-# sdptool (para enumeración de servicios)
-if [ -f /usr/bin/sdptool ]; then
-    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/sdptool
-    echo -e "${GREEN}  [+] sdptool configurado${NC}"
-fi
-
-# hciconfig (para configuración de adaptadores)
-if [ -f /usr/bin/hciconfig ]; then
-    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/hciconfig
-    echo -e "${GREEN}  [+] hciconfig configurado${NC}"
-fi
-
-# bccmd (para adaptadores CSR - opcional)
-if [ -f /usr/bin/bccmd ]; then
-    setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/bccmd
-    echo -e "${GREEN}  [+] bccmd configurado (adaptadores CSR)${NC}"
-fi
+for tool in hcitool l2ping rfcomm hcidump sdptool hciconfig bccmd; do
+    if [ -f /usr/bin/$tool ]; then
+        setcap 'cap_net_raw,cap_net_admin+eip' /usr/bin/$tool
+        echo -e "${GREEN}  [+] $tool configurado${NC}"
+    fi
+done
 
 echo -e "${GREEN}Usuario $REAL_USER agregado a grupos: bluetooth, audio, i2c, gpio, spi, dialout${NC}"
 
-# Configurar sudoers para permitir reinicio del servicio sin contraseña
-echo -e "${YELLOW}Configurando permisos para reinicio del servicio...${NC}"
+# Configurar sudoers
+echo -e "${YELLOW}Configurando permisos de reinicio del servicio...${NC}"
 SUDOERS_FILE="/etc/sudoers.d/volumebegone"
 cat > "$SUDOERS_FILE" << SUDOERSEOF
-# Permitir reinicio del servicio volumebegone sin contraseña
+# Permitir control del servicio volumebegone sin contraseña
 $REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart volumebegone
 $REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start volumebegone
 $REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop volumebegone
+$REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart masterbegone
+$REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start masterbegone
+$REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop masterbegone
 $REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/python3
 SUDOERSEOF
 chmod 440 "$SUDOERS_FILE"
-echo -e "${GREEN}  [+] Permisos de reinicio configurados${NC}"
 
 # Enable Bluetooth service
 systemctl enable bluetooth 2>/dev/null || true
 systemctl start bluetooth 2>/dev/null || true
 
 # Install systemd service
-echo -e "${YELLOW}[8/8] Installing systemd service...${NC}"
-SERVICE_FILE="/etc/systemd/system/volumebegone.service"
+echo -e "${BLUE}[8/10] Instalando servicio systemd...${NC}"
 
-cat > "$SERVICE_FILE" << SERVICEEOF
+# Servicio principal (masterbegone)
+cat > /etc/systemd/system/masterbegone.service << SERVICEEOF
 [Unit]
-Description=Volume Be Gone - Bluetooth Speaker Control by Volume Level
+Description=MasterBeGone v3.0 - Hybrid Bluetooth Speaker Control
 After=bluetooth.target sound.target network.target multi-user.target
 Wants=bluetooth.target sound.target
 
@@ -315,15 +341,45 @@ Wants=bluetooth.target sound.target
 Type=simple
 User=$REAL_USER
 Group=$REAL_USER
-WorkingDirectory=$INSTALL_DIR
+WorkingDirectory=$INSTALL_DIR/src
+Environment="PYTHONUNBUFFERED=1"
+Environment="HOME=$REAL_HOME"
+ExecStartPre=/bin/sleep 10
+ExecStart=/usr/bin/python3 $INSTALL_DIR/src/masterbegone.py
+ExecStopPost=-/usr/bin/pkill -f l2ping
+ExecStopPost=-/usr/bin/pkill -f rfcomm
+ExecStopPost=-/usr/bin/pkill -f hcidump
+ExecStopPost=-/usr/bin/pkill -f hcitool
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=masterbegone
+TimeoutStartSec=120
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+
+# Servicio legacy (volumebegone) - para compatibilidad
+cat > /etc/systemd/system/volumebegone.service << SERVICEEOF
+[Unit]
+Description=Volume Be Gone (Legacy) - Bluetooth Speaker Control
+After=bluetooth.target sound.target network.target multi-user.target
+Wants=bluetooth.target sound.target
+
+[Service]
+Type=simple
+User=$REAL_USER
+Group=$REAL_USER
+WorkingDirectory=$INSTALL_DIR/src
 Environment="PYTHONUNBUFFERED=1"
 Environment="HOME=$REAL_HOME"
 ExecStartPre=/bin/sleep 15
 ExecStart=/usr/bin/python3 $INSTALL_DIR/src/volumeBeGone.py
 ExecStopPost=-/usr/bin/pkill -f l2ping
 ExecStopPost=-/usr/bin/pkill -f rfcomm
-ExecStopPost=-/usr/bin/pkill -f hcidump
-ExecStopPost=-/usr/bin/pkill -f hcitool
 Restart=on-failure
 RestartSec=30
 StandardOutput=journal
@@ -337,17 +393,95 @@ WantedBy=multi-user.target
 SERVICEEOF
 
 systemctl daemon-reload
-echo -e "${GREEN}Systemd service installed${NC}"
+echo -e "${GREEN}Servicios systemd instalados${NC}"
 
-echo -e "${GREEN}=====================================${NC}"
-echo -e "${GREEN}Installation completed successfully${NC}"
-echo -e "${GREEN}=====================================${NC}"
-echo
-echo "Instalado para usuario: $REAL_USER"
-echo "Directorio: $INSTALL_DIR"
-echo
-echo "Next steps:"
-echo "1. Reboot: sudo reboot"
-echo "2. Test: python3 $INSTALL_DIR/src/volumeBeGone.py"
-echo "3. Auto-start: sudo systemctl enable volumebegone"
-echo
+# Crear script de inicio rápido
+echo -e "${BLUE}[9/10] Creando scripts auxiliares...${NC}"
+
+cat > "$INSTALL_DIR/start.sh" << 'STARTEOF'
+#!/bin/bash
+# Quick start script
+cd "$(dirname "$0")/src"
+sudo python3 masterbegone.py "$@"
+STARTEOF
+chmod +x "$INSTALL_DIR/start.sh"
+
+cat > "$INSTALL_DIR/start-web-only.sh" << 'STARTEOF'
+#!/bin/bash
+# Start in web-only mode (no OLED/encoder)
+cd "$(dirname "$0")/src"
+sudo python3 masterbegone.py --web-only "$@"
+STARTEOF
+chmod +x "$INSTALL_DIR/start-web-only.sh"
+
+cat > "$INSTALL_DIR/start-headless.sh" << 'STARTEOF'
+#!/bin/bash
+# Start without display
+cd "$(dirname "$0")/src"
+sudo python3 masterbegone.py --headless "$@"
+STARTEOF
+chmod +x "$INSTALL_DIR/start-headless.sh"
+
+chown -R "$REAL_USER:$REAL_USER" "$INSTALL_DIR"
+
+# Resumen final
+echo -e "${BLUE}[10/10] Verificación final...${NC}"
+
+echo ""
+echo -e "${YELLOW}Verificando componentes instalados:${NC}"
+
+# Python
+python3 --version && echo -e "  ${GREEN}[OK] Python3${NC}" || echo -e "  ${RED}[!] Python3${NC}"
+
+# Flask
+python3 -c "import flask" 2>/dev/null && echo -e "  ${GREEN}[OK] Flask${NC}" || echo -e "  ${RED}[!] Flask${NC}"
+
+# SocketIO
+python3 -c "import flask_socketio" 2>/dev/null && echo -e "  ${GREEN}[OK] Flask-SocketIO${NC}" || echo -e "  ${RED}[!] Flask-SocketIO${NC}"
+
+# luma.oled
+python3 -c "from luma.oled.device import ssd1306" 2>/dev/null && echo -e "  ${GREEN}[OK] luma.oled${NC}" || echo -e "  ${RED}[!] luma.oled${NC}"
+
+# sounddevice
+python3 -c "import sounddevice" 2>/dev/null && echo -e "  ${GREEN}[OK] sounddevice${NC}" || echo -e "  ${RED}[!] sounddevice${NC}"
+
+# pyserial
+python3 -c "import serial" 2>/dev/null && echo -e "  ${GREEN}[OK] pyserial${NC}" || echo -e "  ${RED}[!] pyserial${NC}"
+
+# hostapd
+command -v hostapd &>/dev/null && echo -e "  ${GREEN}[OK] hostapd${NC}" || echo -e "  ${RED}[!] hostapd${NC}"
+
+# dnsmasq
+command -v dnsmasq &>/dev/null && echo -e "  ${GREEN}[OK] dnsmasq${NC}" || echo -e "  ${RED}[!] dnsmasq${NC}"
+
+echo ""
+echo -e "${GREEN}╔════════════════════════════════════════════════╗"
+echo "║         ¡Instalación Completada!               ║"
+echo "╚════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${YELLOW}Instalado para usuario:${NC} $REAL_USER"
+echo -e "${YELLOW}Directorio:${NC} $INSTALL_DIR"
+echo ""
+echo -e "${YELLOW}Próximos pasos:${NC}"
+echo ""
+echo "  1. Reiniciar para aplicar cambios de kernel:"
+echo "     ${BLUE}sudo reboot${NC}"
+echo ""
+echo "  2. Configurar Access Point (opcional):"
+echo "     ${BLUE}sudo bash $INSTALL_DIR/scripts/setup_ap.sh${NC}"
+echo ""
+echo "  3. Probar el sistema:"
+echo "     ${BLUE}cd $INSTALL_DIR && ./start.sh${NC}"
+echo ""
+echo "  4. Habilitar inicio automático:"
+echo "     ${BLUE}sudo systemctl enable masterbegone${NC}"
+echo ""
+echo -e "${YELLOW}Modos de ejecución:${NC}"
+echo "  Normal (OLED + Web):  ./start.sh"
+echo "  Solo Web:             ./start-web-only.sh"
+echo "  Sin display:          ./start-headless.sh"
+echo ""
+echo -e "${YELLOW}Servicios systemd:${NC}"
+echo "  masterbegone  - Sistema completo v3.0"
+echo "  volumebegone  - Modo legacy (solo OLED)"
+echo ""

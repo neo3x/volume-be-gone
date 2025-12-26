@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Volume Be Gone v3.0</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔊</text></svg>">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🔊 Volume Be Gone</h1>
+            <span class="version">v3.0</span>
+        </header>
+
+        <!-- Volume Meter -->
+        <section class="card volume-section">
+            <h2>🎚️ Volumen Ambiental</h2>
+            <div class="volume-display">
+                <span class="volume-value" id="volume-value">0.0</span>
+                <span class="volume-unit">dB</span>
+            </div>
+            <div class="meter-container">
+                <div class="meter-bar" id="volume-bar"></div>
+                <div class="threshold-marker" id="threshold-marker"></div>
+            </div>
+            <div class="meter-labels">
+                <span>0</span>
+                <span>40</span>
+                <span>80</span>
+                <span>120</span>
+            </div>
+            <div class="threshold-control">
+                <label for="threshold-slider">Umbral: <span id="threshold-value">73</span> dB</label>
+                <input type="range" id="threshold-slider" min="70" max="120" value="73">
+            </div>
+            <div class="status-indicator" id="status-indicator">
+                <span class="status-dot"></span>
+                <span class="status-text">Monitoreando...</span>
+            </div>
+        </section>
+
+        <!-- Devices -->
+        <section class="card devices-section">
+            <div class="section-header">
+                <h2>📡 Dispositivos</h2>
+                <button class="btn btn-secondary" id="btn-scan">🔍 Escanear</button>
+            </div>
+            <div class="device-stats" id="device-stats">
+                <span class="stat">Total: <strong id="stat-total">0</strong></span>
+                <span class="stat">Audio: <strong id="stat-audio">0</strong></span>
+                <span class="stat">BLE: <strong id="stat-ble">0</strong></span>
+            </div>
+            <div class="device-list" id="device-list">
+                <div class="empty-state">
+                    <span>Sin dispositivos detectados</span>
+                    <small>Presiona Escanear para buscar</small>
+                </div>
+            </div>
+        </section>
+
+        <!-- Controls -->
+        <section class="card controls-section">
+            <h2>⚙️ Controles</h2>
+            <div class="control-buttons">
+                <button class="btn btn-primary btn-large" id="btn-attack-start">
+                    🚀 Iniciar Ataque
+                </button>
+                <button class="btn btn-danger btn-large" id="btn-attack-stop" disabled>
+                    ⏹️ Detener
+                </button>
+            </div>
+            <div class="esp32-status">
+                <div class="esp32-indicator" id="esp32-indicator">
+                    <span class="indicator-dot"></span>
+                    <span>ESP32: <strong id="esp32-status">Desconectado</strong></span>
+                </div>
+                <div class="jam-controls" id="jam-controls" style="display: none;">
+                    <button class="btn btn-small" id="btn-jam-bt">JAM BT</button>
+                    <button class="btn btn-small" id="btn-jam-ble">JAM BLE</button>
+                    <button class="btn btn-small" id="btn-jam-stop">STOP</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Attack Status -->
+        <section class="card attack-section" id="attack-section" style="display: none;">
+            <h2>⚡ Ataque Activo</h2>
+            <div class="attack-target" id="attack-target">
+                <span class="target-name">-</span>
+                <span class="target-addr">-</span>
+            </div>
+            <div class="attack-progress">
+                <div class="progress-bar" id="attack-progress"></div>
+            </div>
+            <div class="attack-stats">
+                <span>Threads: <strong id="attack-threads">0</strong></span>
+                <span>RF Jam: <strong id="attack-rf">OFF</strong></span>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <span>Volume Be Gone v3.0</span>
+            <span>•</span>
+            <span>IP: <span id="server-ip">192.168.4.1</span></span>
+        </footer>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
