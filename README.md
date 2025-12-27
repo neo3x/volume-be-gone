@@ -1,359 +1,144 @@
 # Volume Be Gone v3.0
 
-Control automatico de parlantes Bluetooth por nivel de volumen usando Raspberry Pi + ESP32
-
-**Author:** Francisco Ortiz Rojas - Ingeniero Electronico
-**Contact:** francisco.ortiz@marfinex.com
-**Version:** 3.0 | **Date:** Diciembre 2025
+### Tu solución inteligente para el ruido excesivo
 
 ---
 
-## Descripcion
+## ¿Qué es esto?
 
-Volume Be Gone es un sistema híbrido (Raspberry Pi + ESP32) que monitorea el nivel de ruido ambiental y automaticamente intenta desconectar parlantes Bluetooth cercanos cuando el volumen supera un umbral configurable (70-120 dB).
+**Volume Be Gone** es un dispositivo que detecta cuando hay demasiado ruido de parlantes Bluetooth y automáticamente intenta silenciarlos.
 
-### Novedades v3.0 - Arquitectura Modular + Web
+**Ideal para:**
+- Mantener la paz en tu hogar u oficina
+- Ambientes donde necesitas tranquilidad
+- Cualquier lugar con ruido excesivo de parlantes
 
-La versión 3.0 introduce una arquitectura completamente modular con servidor web integrado:
+---
 
-**Nuevas Características:**
-- **Arquitectura Modular**: Código dividido en módulos independientes para fácil mantenimiento
-- **Servidor Web**: Interfaz responsive accesible desde cualquier dispositivo
-- **Access Point Mode**: La RPi crea su propia red WiFi (no necesita router)
-- **Control desde Celular**: Monitoreo y control completo desde el navegador
-- **ESP32 BlueJammer**: Integración con ESP32 para RF Jamming de capa física
-- **Ataque Multicapa**: Combina PHY (RF) + L2CAP + RFCOMM simultáneamente
+## Instalación en 3 Pasos
 
-### Características principales:
+```bash
+# 1. Descargar
+git clone https://github.com/neo3x/volume-be-gone.git && cd volume-be-gone
 
-- **Control preciso** con encoder rotativo + interfaz web
-- **Medidor visual** en pantalla OLED 128x64 + navegador web
-- **Alcance extendido** hasta 50m con adaptador Clase 1
-- **Busqueda automatica** de dispositivos cada 30 segundos
-- **Configuracion persistente** en JSON
-- **Inicio automatico** con systemd
-- **RF Jamming** con ESP32 + dual nRF24L01
-- **Ataque multicapa** PHY + L2CAP + RFCOMM
+# 2. Instalar
+sudo bash scripts/install.sh
 
-## Disclaimer
-
-> **IMPORTANTE**: Este proyecto es solo para fines educativos. Usalo unicamente con tus propios dispositivos o con permiso explicito. El uso indebido puede ser ilegal en tu jurisdiccion.
-
-## Arquitectura del Sistema
-
+# 3. Ejecutar
+./start.sh
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    VOLUME BE GONE v3.0                          │
-│                   Arquitectura Híbrida                          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   ┌──────────────────────────────────────────────────────────┐ │
-│   │                  RASPBERRY PI (Cerebro)                   │ │
-│   ├──────────────────────────────────────────────────────────┤ │
-│   │                                                          │ │
-│   │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │ │
-│   │  │   Audio     │  │  Bluetooth  │  │   Display   │      │ │
-│   │  │  Monitor    │  │   Scanner   │  │   Manager   │      │ │
-│   │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘      │ │
-│   │         │                │                │              │ │
-│   │         └────────────────┼────────────────┘              │ │
-│   │                          │                               │ │
-│   │                   ┌──────┴──────┐                        │ │
-│   │                   │  MASTER     │                        │ │
-│   │                   │  BEGONE     │                        │ │
-│   │                   │ (Orquesta)  │                        │ │
-│   │                   └──────┬──────┘                        │ │
-│   │                          │                               │ │
-│   │         ┌────────────────┼────────────────┐              │ │
-│   │         │                │                │              │ │
-│   │  ┌──────┴──────┐  ┌──────┴──────┐  ┌──────┴──────┐      │ │
-│   │  │   Attack    │  │    Web      │  │   ESP32     │      │ │
-│   │  │   Engine    │  │   Server    │  │ Controller  │      │ │
-│   │  └─────────────┘  └─────────────┘  └──────┬──────┘      │ │
-│   │                                           │ Serial      │ │
-│   └───────────────────────────────────────────┼──────────────┘ │
-│                                               │                │
-│   ┌───────────────────────────────────────────┼──────────────┐ │
-│   │                    ESP32 (Músculo RF)     │              │ │
-│   ├───────────────────────────────────────────┼──────────────┤ │
-│   │                                           ▼              │ │
-│   │              ┌─────────────────────────────┐             │ │
-│   │              │    ESP32 BlueJammer         │             │ │
-│   │              │    (Dual nRF24L01)          │             │ │
-│   │              └──────────┬──────────────────┘             │ │
-│   │                         │                                │ │
-│   │              ┌──────────┴──────────┐                     │ │
-│   │              │                     │                     │ │
-│   │        ┌─────┴─────┐         ┌─────┴─────┐              │ │
-│   │        │ nRF24 #1  │         │ nRF24 #2  │              │ │
-│   │        │ (CH 0-62) │         │ (CH 63-124)│              │ │
-│   │        └───────────┘         └───────────┘              │ │
-│   └─────────────────────────────────────────────────────────┘ │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+
+**¿Necesitas más ayuda?** Ver [Guía de Inicio Rápido](docs/usuario/INICIO_RAPIDO.md)
+
+---
+
+## Control desde tu Celular
+
+```bash
+sudo bash scripts/setup_ap.sh
 ```
+
+Luego:
+1. Conecta a WiFi **VolumeBeGone** (contraseña: `begone2025`)
+2. Abre en el navegador: `http://192.168.4.1:5000`
+
+---
+
+## Documentación
+
+### Para Usuarios
+
+| Documento | ¿Qué encontrarás? |
+|-----------|-------------------|
+| [¿Qué es Volume Be Gone?](docs/usuario/QUE_ES_VOLUME_BE_GONE.md) | Explicación simple y clara |
+| [Inicio Rápido](docs/usuario/INICIO_RAPIDO.md) | Empezar en 5 minutos |
+| [Manual de Usuario](docs/usuario/MANUAL_USUARIO.md) | Guía completa paso a paso |
+
+### Para Técnicos
+
+| Documento | Contenido |
+|-----------|-----------|
+| [Instalación Detallada](docs/INSTALACION.md) | Instalación manual |
+| [Solución de Problemas](docs/TROUBLESHOOTING.md) | Errores comunes |
+| [Arquitectura](docs/tecnico/ARQUITECTURA_HIBRIDA.md) | Diseño del sistema |
+| [Hardware](docs/hardware/) | Diagramas de conexiones |
+
+---
 
 ## Hardware Necesario
 
-### Componentes Raspberry Pi (Base):
+### Versión Básica (~$60)
 
-| Componente | Descripción | Cantidad |
-|------------|-------------|----------|
-| Raspberry Pi 3B+/4B | 2GB+ RAM | 1 |
-| Pantalla OLED | 128x64 I2C SSD1306 | 1 |
-| Encoder Rotativo | KY-040 | 1 |
-| Microfono USB | Cualquiera compatible | 1 |
-| Adaptador BT | Clase 1 USB (opcional) | 1 |
-| Fuente 5V | 3A USB-C | 1 |
+| Componente | Descripción |
+|------------|-------------|
+| Raspberry Pi 3B+/4 | El cerebro |
+| Micrófono USB | Para escuchar |
+| Pantalla OLED | Para ver el estado |
+| Encoder (perilla) | Para ajustar |
 
-### Componentes ESP32 BlueJammer (v3.0):
+### Versión Avanzada (~$100)
 
-| Componente | Descripción | Cantidad |
-|------------|-------------|----------|
-| ESP32 DevKit V1 | 38 pines | 1 |
-| nRF24L01+PA+LNA | Con antena externa | 2 |
-| Antena 12dBi | 2400-2500MHz | 2 |
-| Capacitor 100µF/16V | Electrolítico | 2 |
-| Capacitor 100nF | Cerámico | 2 |
-| Cable USB | Para conexión a RPi | 1 |
+Agrega mayor alcance con:
+- ESP32 + 2x nRF24L01 + antenas
 
-### Diagrama de Conexiones:
+---
 
-- RPi: Ver `hardware/README.md`
-- ESP32: Ver `hardware/ESP32_WIRING.md`
-- Arquitectura completa: Ver `PROPUESTA_HIBRIDA_COMPLETA.md`
-
-## Instalacion
-
-### Metodo rapido:
+## Comandos Útiles
 
 ```bash
-# Clonar repositorio
-git clone https://github.com/neo3x/volume-be-gone.git
-cd volume-be-gone
-
-# Ejecutar instalador automatico
-chmod +x scripts/install.sh
-sudo ./scripts/install.sh
-
-# (Opcional) Configurar Access Point para control desde celular
-sudo ./scripts/setup_ap.sh
+./start.sh                              # Iniciar
+./start-web-only.sh                     # Solo interfaz web
+sudo systemctl status masterbegone      # Ver estado
+sudo journalctl -u masterbegone -f      # Ver logs
+sudo bash scripts/autostart.sh          # Configurar inicio automático
 ```
 
-### Metodo manual:
+---
 
-Ver `docs/INSTALL.md` para instrucciones detalladas.
-
-## Uso
-
-### Modos de Ejecución:
-
-```bash
-# Modo completo (OLED + Web + ESP32)
-./start.sh
-
-# Solo servidor web (sin OLED/encoder)
-./start-web-only.sh
-
-# Sin display (headless)
-./start-headless.sh
-
-# Con opciones específicas
-cd src && python3 masterbegone.py --help
-```
-
-### Opciones de Línea de Comando:
-
-```
-python3 masterbegone.py [opciones]
-
-Opciones:
-  --headless    Ejecutar sin display OLED
-  --no-esp32    Deshabilitar comunicación con ESP32
-  --web-only    Solo servidor web (sin OLED/encoder)
-  --debug       Activar modo debug
-  --version     Mostrar versión
-```
-
-### Acceso Web:
-
-1. **Con Access Point (recomendado):**
-   - Conecta a la red WiFi `VolumeBeGone`
-   - Contraseña: `begone2025`
-   - Abre: `http://192.168.4.1:5000`
-
-2. **En red existente:**
-   - Abre: `http://<IP-de-la-RPi>:5000`
-
-### Controles Físicos:
-
-- **Girar encoder**: Ajustar umbral
-- **Presionar encoder**: Guardar configuración
-- **Mantener 2s**: Reiniciar sistema
-
-### Como Servicio:
-
-```bash
-# Iniciar
-sudo systemctl start masterbegone
-
-# Detener
-sudo systemctl stop masterbegone
-
-# Ver logs
-sudo journalctl -u masterbegone -f
-
-# Habilitar auto-inicio
-sudo systemctl enable masterbegone
-```
-
-### Gestor de Auto-Inicio:
-
-```bash
-sudo bash scripts/autostart.sh
-```
-
-## Estructura del Proyecto v3.0
+## Estructura del Proyecto
 
 ```
 volume-be-gone/
+├── docs/
+│   ├── usuario/          # Manuales para usuarios
+│   ├── tecnico/          # Documentación técnica
+│   └── hardware/         # Diagramas de conexiones
 ├── src/
-│   ├── masterbegone.py           # Orquestador principal v3.0
-│   ├── volumeBeGone.py           # Script legacy (solo OLED)
-│   ├── modules/
-│   │   ├── __init__.py           # Exports de módulos
-│   │   ├── config.py             # Configuración centralizada
-│   │   ├── audio_monitor.py      # Monitoreo de audio
-│   │   ├── bluetooth_scanner.py  # Escaneo BT/BLE
-│   │   ├── display_manager.py    # OLED + Encoder
-│   │   ├── attack_engine.py      # Motor de ataques
-│   │   ├── esp32_controller.py   # Control ESP32 serial
-│   │   └── web_server.py         # Servidor Flask + SocketIO
-│   └── static/
-│       ├── index.html            # UI web principal
-│       ├── css/style.css         # Estilos dark theme
-│       └── js/app.js             # Cliente WebSocket
-├── firmware/
-│   └── esp32_hybrid/
-│       └── esp32_hybrid.ino      # Firmware ESP32
-├── hardware/
-│   ├── ESP32_WIRING.md           # Conexionado ESP32
-│   ├── NRF24L01_WIRING.md        # Conexionado nRF24
-│   └── GPIO_COMPATIBILITY_ANALYSIS.md
-├── scripts/
-│   ├── install.sh                # Instalador v3.0
-│   ├── autostart.sh              # Gestor de auto-inicio
-│   └── setup_ap.sh               # Configurar Access Point
-├── config/
-│   └── settings.json             # Configuración por defecto
-├── PROPUESTA_HIBRIDA_COMPLETA.md # Documentación arquitectura
-├── ARQUITECTURA_HIBRIDA.md       # Diagramas
-├── COMPARACION_JAMMERS_ESP32.md  # Análisis repos ESP32
-└── README.md                     # Este archivo
+│   ├── masterbegone.py   # Programa principal
+│   ├── modules/          # Módulos del sistema
+│   └── static/           # Interfaz web
+├── scripts/              # Scripts de instalación
+├── firmware/             # Código para ESP32
+└── config/               # Configuración
 ```
 
-## Módulos del Sistema
+---
 
-### MasterBeGone (masterbegone.py)
-Orquestador principal que coordina todos los módulos.
+## Disclaimer
 
-### Config (modules/config.py)
-Configuración centralizada con dataclasses para tipo-seguro.
+> **IMPORTANTE**: Este proyecto es **solo para fines educativos**.
+> Úsalo únicamente con tus propios dispositivos o con permiso explícito.
+> El uso indebido puede ser ilegal.
 
-### AudioMonitor (modules/audio_monitor.py)
-Monitoreo de nivel de audio ambiental con callbacks.
+---
 
-### BluetoothScanner (modules/bluetooth_scanner.py)
-Escaneo dual-mode (Classic + BLE) con detección de dispositivos de audio.
+## Créditos
 
-### DisplayManager (modules/display_manager.py)
-Control de pantalla OLED SSD1306 y encoder rotativo.
+**Desarrollado por:** Francisco Ortiz Rojas - Ingeniero Electrónico
 
-### AttackEngine (modules/attack_engine.py)
-Motor de ataques coordinados L2CAP + RFCOMM + ESP32.
+**Contacto:** francisco.ortiz@marfinex.com
 
-### ESP32Controller (modules/esp32_controller.py)
-Comunicación serial con ESP32 BlueJammer.
+**Inspirado en:** "Reggaeton Be Gone" de Roni Bandini
 
-### WebServer (modules/web_server.py)
-Servidor Flask + SocketIO para interfaz web en tiempo real.
-
-## API REST
-
-| Endpoint | Método | Descripción |
-|----------|--------|-------------|
-| `/api/status` | GET | Estado completo del sistema |
-| `/api/threshold` | POST | Cambiar umbral de volumen |
-| `/api/devices` | GET | Lista de dispositivos detectados |
-| `/api/scan` | POST | Iniciar escaneo Bluetooth |
-| `/api/attack` | POST | Atacar dispositivo específico |
-| `/api/attack/start` | POST | Iniciar ataque continuo |
-| `/api/attack/stop` | POST | Detener ataques |
-| `/api/esp32/status` | GET | Estado del ESP32 |
-| `/api/esp32/jam` | POST | Control de jamming |
-
-## WebSocket Events
-
-| Evento | Dirección | Descripción |
-|--------|-----------|-------------|
-| `volume` | Server → Client | Nivel de volumen actual |
-| `devices` | Server → Client | Lista de dispositivos |
-| `device_found` | Server → Client | Nuevo dispositivo detectado |
-| `status` | Server → Client | Estado completo |
-| `set_threshold` | Client → Server | Cambiar umbral |
-
-## Solución de Problemas
-
-### El servidor web no inicia
-```bash
-# Verificar dependencias
-python3 -c "import flask_socketio"
-
-# Reinstalar si es necesario
-pip3 install flask flask-socketio eventlet --break-system-packages
-```
-
-### ESP32 no detectado
-```bash
-# Verificar conexión serial
-ls -la /dev/ttyUSB*
-
-# Verificar permisos
-sudo usermod -a -G dialout $USER
-# (requiere logout/login)
-```
-
-### OLED no muestra nada
-```bash
-# Verificar I2C
-sudo i2cdetect -y 1
-# Debe mostrar dirección 3C
-```
-
-### Access Point no funciona
-```bash
-# Verificar servicios
-sudo systemctl status hostapd
-sudo systemctl status dnsmasq
-
-# Reiniciar
-sudo systemctl restart hostapd dnsmasq
-```
+---
 
 ## Licencia
 
-Este proyecto esta bajo la Licencia MIT - ver LICENSE para detalles.
-
-## Creditos
-
-**Desarrollado por:**
-- **Francisco Ortiz Rojas** - Ingeniero Electronico
-- **Email:** francisco.ortiz@marfinex.com
-
-**Agradecimientos:**
-- Inspirado en "Reggaeton Be Gone" de Roni Bandini
-- Comunidad Raspberry Pi
-- Repositorios ESP32-BlueJammer analizados para integración
+MIT License - Ver [LICENSE](LICENSE)
 
 ---
-*Volume Be Gone v3.0 - Diciembre 2025*
+
+<p align="center">
+  <b>Volume Be Gone v3.0</b> | Diciembre 2025<br>
+  <i>"Porque todos merecemos un poco de paz y tranquilidad"</i>
+</p>
